@@ -1,8 +1,33 @@
 import openai
 import streamlit as st
+import time
 
-# ✅ Use OpenAI SDK v1.x style
+# ✅ Secure OpenAI API client
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+# ✅ Fallback logic: Try GPT-4o → fall back to GPT-3.5
+def call_gpt_with_fallback(prompt):
+    try:
+        # Attempt GPT-4o
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        st.warning(f"⚠️ GPT-4o failed. Reason: {str(e)}\nFalling back to GPT-3.5-turbo...")
+        time.sleep(1)
+        try:
+            # Retry with GPT-3.5
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e2:
+            st.error(f"❌ Both models failed.\nError: {str(e2)}")
+            return "⚠️ Failed to generate response due to API errors."
 
 # 🔍 Compare JD and Resume
 def compare_resume(jd_text, resume_text):
@@ -23,11 +48,7 @@ Job Description:
 Resume:
 {resume_text}
 """
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message.content.strip()
+    return call_gpt_with_fallback(prompt)
 
 # 💬 Generate WhatsApp, Email, and Screening Questions
 def generate_followup(jd_text, resume_text):
@@ -44,33 +65,32 @@ Job Description:
 Resume:
 {resume_text}
 """
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message.content.strip()
+    return call_gpt_with_fallback(prompt)
 
 # 🎯 Streamlit UI
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
-st.title("📄 Resume Matcher Bot (GPT-4o)")
-st.write("Upload a JD + one or more resumes. Get match scores, then generate messages.")
+st.title("📄 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
+st.write("Upload a JD + one or more resumes. Get match scores, then generate WhatsApp, email, and screening questions.")
 
-jd_file = st.file_uploader("📌 Upload JD", type=["txt", "pdf", "docx"])
-resume_files = st.file_uploader("📥 Upload Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True)
+# 📂 Upload files
+jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"])
+resume_files = st.file_uploader("📥 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True)
 
+# 🚀 Run Matching Logic
 if st.button("Run Matching") and jd_file and resume_files:
     jd_text = jd_file.read().decode("utf-8", errors="ignore")
-    followup_states = {}
 
     for idx, resume_file in enumerate(resume_files):
         resume_text = resume_file.read().decode("utf-8", errors="ignore")
-        with st.spinner(f"Analyzing {resume_file.name}..."):
+
+        with st.spinner(f"🔍 Analyzing {resume_file.name}..."):
             result = compare_resume(jd_text, resume_text)
 
         st.markdown("---")
         st.subheader(f"📛 {resume_file.name}")
         st.markdown(result)
 
+        # Prompt for message generation
         followup_key = f"followup_{idx}"
         if st.button(f"✅ Generate WhatsApp/Email/Screening for {resume_file.name}", key=followup_key):
             with st.spinner("Generating messages..."):
