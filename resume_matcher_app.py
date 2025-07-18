@@ -1,10 +1,7 @@
 # resume_matcher_app.py
 import openai
 import streamlit as st
-
-openai.api_key = st.secrets["OPENAI_API_KEY"]
-Replace with your actual API key
-
+openai.api_key = st.secrets["OPENAI_API_KEY"]  # ✅ This is correct and secure
 # 🔍 Compare JD and Resume
 def compare_resume(jd_text, resume_text):
     prompt = f"""
