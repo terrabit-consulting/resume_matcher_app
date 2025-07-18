@@ -1,7 +1,9 @@
-# resume_matcher_app.py
 import openai
 import streamlit as st
-openai.api_key = st.secrets["OPENAI_API_KEY"]  # ✅ This is correct and secure
+
+# ✅ Use OpenAI SDK v1.x style
+client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 # 🔍 Compare JD and Resume
 def compare_resume(jd_text, resume_text):
     prompt = f"""
@@ -21,7 +23,7 @@ Job Description:
 Resume:
 {resume_text}
 """
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}]
     )
@@ -42,7 +44,7 @@ Job Description:
 Resume:
 {resume_text}
 """
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}]
     )
