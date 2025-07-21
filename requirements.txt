@@ -2,4 +2,3 @@ openai
 streamlit
 PyMuPDF
 python-docx
-spacy
