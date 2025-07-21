@@ -137,7 +137,7 @@ st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
 
-# ✅ Reset state
+# ✅ Init session state
 if "reset_key" not in st.session_state:
     st.session_state["reset_key"] = 0
 if "results" not in st.session_state:
@@ -149,21 +149,23 @@ if "jd_text" not in st.session_state:
 if "jd_file" not in st.session_state:
     st.session_state["jd_file"] = None
 
-# ✅ Reset Button with session key
+# ✅ Reset Session Button
 if st.button("🔄 Start New Matching Session"):
-    st.session_state.clear()
+    st.session_state.pop("results", None)
+    st.session_state.pop("processed_resumes", None)
+    st.session_state.pop("jd_text", None)
+    st.session_state.pop("jd_file", None)
     st.session_state["reset_key"] = int(time.time())
-    st.experimental_rerun()
+    st.rerun()
 
-# ✅ File Uploaders with reset keys
+# ✅ Uploaders
 jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"],
                            key=f"jd_uploader_{st.session_state['reset_key']}")
-
 resume_files = st.file_uploader("📄 Upload Candidate Resumes", type=["txt", "pdf", "docx"],
                                 accept_multiple_files=True,
                                 key=f"resume_uploader_{st.session_state['reset_key']}")
 
-# ✅ Process JD
+# ✅ Read JD
 if jd_file and not st.session_state.get("jd_text"):
     st.session_state["jd_text"] = read_file(jd_file)
     st.session_state["jd_file"] = jd_file.name
@@ -192,7 +194,7 @@ if st.button("▶️ Run Matching") and jd_text and resume_files:
         })
         st.session_state["processed_resumes"].add(resume_file.name)
 
-# ✅ Results Display
+# ✅ Display Results
 summary = []
 for entry in st.session_state["results"]:
     st.markdown("---")
@@ -215,7 +217,15 @@ for entry in st.session_state["results"]:
             st.markdown("---")
             st.markdown(followup)
 
-# ✅ Summary Table
+# ✅ Summary Table + Download
 if summary:
+    df_summary = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
     st.markdown("### 📊 Summary of All Candidates")
-    st.dataframe(pd.DataFrame(summary).sort_values(by="Score", ascending=False))
+    st.dataframe(df_summary)
+
+    st.download_button(
+        label="📥 Download Summary as Excel",
+        data=df_summary.to_excel(index=False, engine='openpyxl'),
+        file_name="resume_match_summary.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
