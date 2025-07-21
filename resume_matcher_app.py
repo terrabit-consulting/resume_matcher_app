@@ -7,10 +7,10 @@ import pandas as pd
 import re
 import uuid  # For resetting uploader keys
 
-# ——— API Client ———
+# --- API Client ---
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# ——— GPT Call with Fallback ———
+# --- GPT Call with Fallback ---
 def call_gpt_with_fallback(prompt):
     try:
         response = client.chat.completions.create(
@@ -33,40 +33,48 @@ def call_gpt_with_fallback(prompt):
             st.error(f"❌ Both models failed.\nError: {str(e2)}")
             return "⚠️ Failed to generate response."
 
-# ——— Candidate Name Extraction ———
+# --- Robust Candidate Name Extractor ---
 def extract_candidate_name(resume_text, filename):
     lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
 
-    for line in lines[:20]:
-        if re.search(r"(Candidate\s*Name|Resume of)", line, re.IGNORECASE):
-            name_match = re.search(r"(?:Candidate\s*Name|Resume of)[:\-]?\s*(.+)", line, re.IGNORECASE)
-            if name_match:
-                name = name_match.group(1).strip()
-                if len(name.split()) <= 5 and "bachelor" not in name.lower():
-                    return name
+    # 1. Search headers/footers for "Name", "Full Name", etc.
+    for line in lines[:30] + lines[-30:]:
+        if re.search(r"\b(name|full[\s_-]?name)\b", line, re.IGNORECASE):
+            match = re.search(r"\b(name|full[\s_-]?name)\b[:\-]?\s*(.+)", line, re.IGNORECASE)
+            if match:
+                name_candidate = match.group(2).strip()
+                if 1 < len(name_candidate.split()) <= 5 and not re.search(
+                    r"\b(B\.?Tech|Bachelor|Engineer|Responsibilities|Client|Score|Summary)\b", name_candidate, re.IGNORECASE):
+                    return name_candidate
 
-    for line in lines[:10]:
-        if "name:" in line.lower():
-            name = line.split(":")[1].strip()
-            if not any(word in name.lower() for word in ["bachelor", "technology", "degree", "engineer"]):
-                return name
+    # 2. Match "Resume of" or "CV of" (colon or no colon)
+    for line in lines[:30] + lines[-30:]:
+        match = re.search(r"(resume|cv)\s+of[:\-]?\s*(.+)", line, re.IGNORECASE)
+        if match:
+            possible_name = match.group(2).strip()
+            if 1 < len(possible_name.split()) <= 5 and not re.search(
+                r"(Engineer|Client|Summary|Score|Responsibilities)", possible_name, re.IGNORECASE):
+                return possible_name
 
-    for line in lines[:10]:
-        if len(line.split()) <= 4 and not re.search(r"bachelor|technology|degree|engineer", line, re.IGNORECASE):
+    # 3. Valid short line in footer (e.g. name on last page)
+    for line in reversed(lines[-20:]):
+        if len(line.split()) <= 5 and not re.search(
+            r"\d|@|http|[{}]|Engineer|Developer|Consultant|Summary|Page", line, re.IGNORECASE):
             return line
 
+    # 4. Fallback to cleaned filename
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-\.]+", " ", name)
     return name.title()
 
-# ——— JD vs Resume Comparison ———
+# --- JD vs Resume Comparison ---
 def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
 You are a Recruiter Assistant bot.
 
 Compare the following resume to the job description and return the result in the following format:
 
-📛 **Name**: {candidate_name}
+💼 **Name**: {candidate_name}
 ✅ **Score**: [Match Score]%
 
 🔧 **Reason**:
@@ -84,7 +92,7 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# ——— Generate WhatsApp, Email, and Screening Questions ———
+# --- Generate WhatsApp, Email, and Screening Questions ---
 def generate_followup(jd_text, resume_text):
     prompt = f"""
 Based on the resume and job description below, generate:
@@ -100,7 +108,7 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# ——— File Readers ———
+# --- File Readers ---
 def read_pdf(file):
     text = ""
     pdf_doc = fitz.open(stream=file.read(), filetype="pdf")
@@ -120,12 +128,11 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
-# ——— UI ———
+# --- UI Setup ---
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
 st.write("Upload a JD and multiple resumes. This tool gives match scores, red flags, and optional messaging.")
 
-# ——— Session Init ———
 if 'results' not in st.session_state:
     st.session_state['results'] = {}
 if 'processed_resumes' not in st.session_state:
@@ -133,25 +140,25 @@ if 'processed_resumes' not in st.session_state:
 if 'session_uid' not in st.session_state:
     st.session_state['session_uid'] = str(uuid.uuid4())
 
-# ——— Reset Session ———
+# Reset button
 if st.button("🔄 Start New Matching Session"):
     st.session_state['results'].clear()
     st.session_state['processed_resumes'].clear()
     st.session_state.pop('jd_text', None)
-    st.session_state['session_uid'] = str(uuid.uuid4())  # force reset uploader keys
+    st.session_state['session_uid'] = str(uuid.uuid4())
     st.rerun()
 
-# ——— Uploaders (use dynamic key) ———
+# Upload widgets
 jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"], key="jd_" + st.session_state['session_uid'])
-resume_files = st.file_uploader("📥 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resumes_" + st.session_state['session_uid'])
+resume_files = st.file_uploader("📅 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resumes_" + st.session_state['session_uid'])
 
-# ——— Store JD ———
+# Store JD
 if jd_file and 'jd_text' not in st.session_state:
     st.session_state['jd_text'] = read_file(jd_file)
 
 jd_text = st.session_state.get('jd_text', '')
 
-# ——— Run Matching ———
+# Run matching
 if st.button("Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state['processed_resumes']:
@@ -165,7 +172,9 @@ if st.button("Run Matching") and jd_text and resume_files:
 
         match = re.search(r"\*\*Name\*\*:\s*(.+)", result)
         if match:
-            candidate_name = match.group(1).strip()
+            extracted_name = match.group(1).strip()
+            if 2 <= len(extracted_name.split()) <= 5:
+                candidate_name = extracted_name
 
         st.session_state['results'][resume_file.name] = {
             'candidate': candidate_name,
@@ -176,15 +185,16 @@ if st.button("Run Matching") and jd_text and resume_files:
 
         st.session_state['processed_resumes'].add(resume_file.name)
 
-# ——— Display Results ———
+# Display results
 summary = []
 for resume_name, data in st.session_state['results'].items():
     st.markdown("---")
-    st.subheader(f"📛 {resume_name}")
-    st.markdown(data['result'])
+    st.subheader(f"💼 {resume_name}")
+    clean_result = "\n".join([line.strip() for line in data['result'].splitlines() if line.strip()])
+    st.markdown(clean_result)
 
     try:
-        score_line = next((line for line in data['result'].splitlines() if "Score" in line), "")
+        score_line = next((line for line in clean_result.splitlines() if "Score" in line), "")
         score = int(score_line.split(":")[1].strip().replace("%", "").replace("**", ""))
     except:
         score = 0
@@ -204,7 +214,7 @@ for resume_name, data in st.session_state['results'].items():
             st.markdown("---")
             st.markdown(followup)
 
-# ——— Summary Table ———
+# Summary Table
 if summary:
     st.markdown("### 📊 Summary of All Candidates")
     df = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
