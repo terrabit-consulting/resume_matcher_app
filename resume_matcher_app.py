@@ -5,11 +5,12 @@ import fitz  # PyMuPDF
 import docx
 import pandas as pd
 import re
+import uuid  # For resetting uploader keys
 
-# Secure OpenAI API access
+# ——— API Client ———
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# GPT call with fallback
+# ——— GPT Call with Fallback ———
 def call_gpt_with_fallback(prompt):
     try:
         response = client.chat.completions.create(
@@ -30,13 +31,12 @@ def call_gpt_with_fallback(prompt):
             return response.choices[0].message.content.strip()
         except Exception as e2:
             st.error(f"❌ Both models failed.\nError: {str(e2)}")
-            return "⚠️ Failed to generate response due to API errors."
+            return "⚠️ Failed to generate response."
 
-# Improved name extraction
+# ——— Candidate Name Extraction ———
 def extract_candidate_name(resume_text, filename):
     lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
 
-    # 1. Try structured phrases
     for line in lines[:20]:
         if re.search(r"(Candidate\s*Name|Resume of)", line, re.IGNORECASE):
             name_match = re.search(r"(?:Candidate\s*Name|Resume of)[:\-]?\s*(.+)", line, re.IGNORECASE)
@@ -45,24 +45,21 @@ def extract_candidate_name(resume_text, filename):
                 if len(name.split()) <= 5 and "bachelor" not in name.lower():
                     return name
 
-    # 2. Try "Name:" pattern
     for line in lines[:10]:
         if "name:" in line.lower():
             name = line.split(":")[1].strip()
             if not any(word in name.lower() for word in ["bachelor", "technology", "degree", "engineer"]):
                 return name
 
-    # 3. Short candidate line check
     for line in lines[:10]:
         if len(line.split()) <= 4 and not re.search(r"bachelor|technology|degree|engineer", line, re.IGNORECASE):
             return line
 
-    # 4. Fallback to cleaned filename
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-\.]+", " ", name)
     return name.title()
 
-# JD vs Resume comparison prompt
+# ——— JD vs Resume Comparison ———
 def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
 You are a Recruiter Assistant bot.
@@ -87,7 +84,7 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# Generate messages and screening Qs
+# ——— Generate WhatsApp, Email, and Screening Questions ———
 def generate_followup(jd_text, resume_text):
     prompt = f"""
 Based on the resume and job description below, generate:
@@ -103,7 +100,7 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# Read uploaded files
+# ——— File Readers ———
 def read_pdf(file):
     text = ""
     pdf_doc = fitz.open(stream=file.read(), filetype="pdf")
@@ -123,37 +120,38 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
-# Streamlit setup
+# ——— UI ———
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
 st.write("Upload a JD and multiple resumes. This tool gives match scores, red flags, and optional messaging.")
 
-# Init session state
+# ——— Session Init ———
 if 'results' not in st.session_state:
     st.session_state['results'] = {}
 if 'processed_resumes' not in st.session_state:
     st.session_state['processed_resumes'] = set()
+if 'session_uid' not in st.session_state:
+    st.session_state['session_uid'] = str(uuid.uuid4())
 
-# 🔄 RESET session and uploaded files
+# ——— Reset Session ———
 if st.button("🔄 Start New Matching Session"):
     st.session_state['results'].clear()
     st.session_state['processed_resumes'].clear()
     st.session_state.pop('jd_text', None)
-    st.session_state["jd_file"] = None
-    st.session_state["resumes"] = None
+    st.session_state['session_uid'] = str(uuid.uuid4())  # force reset uploader keys
     st.rerun()
 
-# Upload files with keys
-jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"], key="jd_file")
-resume_files = st.file_uploader("📥 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resumes")
+# ——— Uploaders (use dynamic key) ———
+jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"], key="jd_" + st.session_state['session_uid'])
+resume_files = st.file_uploader("📥 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resumes_" + st.session_state['session_uid'])
 
-# Store JD text in session
+# ——— Store JD ———
 if jd_file and 'jd_text' not in st.session_state:
     st.session_state['jd_text'] = read_file(jd_file)
 
 jd_text = st.session_state.get('jd_text', '')
 
-# Run Matching
+# ——— Run Matching ———
 if st.button("Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state['processed_resumes']:
@@ -165,7 +163,6 @@ if st.button("Run Matching") and jd_text and resume_files:
         with st.spinner(f"🔍 Analyzing {candidate_name}..."):
             result = compare_resume(jd_text, resume_text, candidate_name)
 
-        # Extract formatted name from result
         match = re.search(r"\*\*Name\*\*:\s*(.+)", result)
         if match:
             candidate_name = match.group(1).strip()
@@ -179,7 +176,7 @@ if st.button("Run Matching") and jd_text and resume_files:
 
         st.session_state['processed_resumes'].add(resume_file.name)
 
-# Show Results
+# ——— Display Results ———
 summary = []
 for resume_name, data in st.session_state['results'].items():
     st.markdown("---")
@@ -207,7 +204,7 @@ for resume_name, data in st.session_state['results'].items():
             st.markdown("---")
             st.markdown(followup)
 
-# Summary Table
+# ——— Summary Table ———
 if summary:
     st.markdown("### 📊 Summary of All Candidates")
     df = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
