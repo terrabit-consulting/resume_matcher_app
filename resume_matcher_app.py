@@ -1,13 +1,13 @@
+
 import openai
 import streamlit as st
 import time
 import fitz  # PyMuPDF
 import docx
+import pandas as pd
 
-# ✅ Secure OpenAI API client
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# ✅ Fallback logic: Try GPT-4o → fall back to GPT-3.5
 def call_gpt_with_fallback(prompt):
     try:
         response = client.chat.completions.create(
@@ -30,41 +30,52 @@ def call_gpt_with_fallback(prompt):
             st.error(f"❌ Both models failed.\nError: {str(e2)}")
             return "⚠️ Failed to generate response due to API errors."
 
-# 🔍 Compare JD and Resume
-def compare_resume(jd_text, resume_text):
+def extract_candidate_name(resume_text, filename):
+    lines = resume_text.splitlines()
+    for line in lines[:10]:
+        if "name:" in line.lower():
+            return line.split(":")[1].strip()
+    return filename.split("_")[1] if "_" in filename else filename.replace(".docx", "")
+
+def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
-    You are a recruiter assistant.
-    Compare the following resume to the job description. Return:
-    1. 📛 Candidate Name
-    2. ✅ Match Score (%)
-    3. 🔍 Key reasons for the score
-    4. ⚠️ Warning if score < 70%
-    
-    Job Description:
-    {jd_text}
-    
-    Resume:
-    {resume_text}
-    """
+You are a Recruiter Assistant bot.
+
+Compare the following resume to the job description and return the result in the following format:
+
+📛 **Name**: {candidate_name}
+✅ **Score**: [Match Score]%
+
+🔧 **Reason**:
+- ⚠️ **Role Match**: (Brief explanation)
+- ✅ **Skill Match**: (Matched or missing skills)
+- ❌ **Major Gaps**: (What is completely missing or irrelevant)
+
+⚠️ **Warning**: Add only if score < 70%
+
+Job Description:
+{jd_text}
+
+Resume:
+{resume_text}
+"""
     return call_gpt_with_fallback(prompt)
 
-# 💬 Generate WhatsApp, Email, and Screening Questions
 def generate_followup(jd_text, resume_text):
     prompt = f"""
-    Based on the resume and job description below, generate:
-    1. 📱 WhatsApp message (casual)
-    2. 📧 Email message (formal)
-    3. 🧠 Screening questions (3-5)
-    
-    Job Description:
-    {jd_text}
-    
-    Resume:
-    {resume_text}
-    """
+Based on the resume and job description below, generate:
+1. 📱 WhatsApp message (casual)
+2. 📧 Email message (formal)
+3. 🧠 Screening questions (3-5)
+
+Job Description:
+{jd_text}
+
+Resume:
+{resume_text}
+"""
     return call_gpt_with_fallback(prompt)
 
-# 📚 PDF reader helper (PyMuPDF)
 def read_pdf(file):
     text = ""
     pdf_doc = fitz.open(stream=file.read(), filetype="pdf")
@@ -72,12 +83,10 @@ def read_pdf(file):
         text += page.get_text()
     return text
 
-# 📚 DOCX reader helper
 def read_docx(file):
     doc = docx.Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
 
-# 📚 Universal file reader
 def read_file(file):
     if file.type == "application/pdf":
         return read_pdf(file)
@@ -86,43 +95,61 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
-# 🎯 Streamlit UI
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
-st.title("📄 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
-st.write("Upload a JD + candidate resumes to get match scores, WhatsApp, email, and screening questions.")
+st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
+st.write("Upload a JD and multiple resumes. This tool gives match scores, red flags, and optional messaging.")
 
-# Session state initialization
 if 'results' not in st.session_state:
     st.session_state['results'] = {}
 
-# 📂 File uploads
 jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"])
 resume_files = st.file_uploader("📥 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True)
 
-# 🚀 Run Matching Logic
 if st.button("Run Matching") and jd_file and resume_files:
     jd_text = read_file(jd_file)
     st.session_state['results'].clear()
 
     for resume_file in resume_files:
         resume_text = read_file(resume_file)
-        with st.spinner(f"🔍 Analyzing {resume_file.name}..."):
-            result = compare_resume(jd_text, resume_text)
+        candidate_name = extract_candidate_name(resume_text, resume_file.name)
+        with st.spinner(f"🔍 Analyzing {candidate_name}..."):
+            result = compare_resume(jd_text, resume_text, candidate_name)
         st.session_state['results'][resume_file.name] = {
+            'candidate': candidate_name,
             'result': result,
             'jd_text': jd_text,
             'resume_text': resume_text
         }
 
-# Display results
+summary = []
 for resume_name, data in st.session_state['results'].items():
     st.markdown("---")
     st.subheader(f"📛 {resume_name}")
+
     st.markdown(data['result'])
 
-    btn_key = f"followup_{resume_name}"
-    if st.button(f"✅ Generate WhatsApp/Email/Screening for {resume_name}", key=btn_key):
+    try:
+        score_line = next((line for line in data['result'].splitlines() if "Score" in line), "")
+        score = int(score_line.split(":")[1].strip().replace("%", "").replace("**", ""))
+    except:
+        score = 0
+
+    if score < 50:
+        st.error("❌ Not suitable – Major role mismatch")
+    elif score < 70:
+        st.warning("⚠️ Consider with caution – Some relevant experience but lacks core skills")
+    else:
+        st.success("✅ Strong match – Good alignment with JD")
+
+    summary.append({"Candidate": data['candidate'], "Score": score})
+
+    if st.button(f"📩 Generate Follow-up for {data['candidate']}", key=f"followup_{resume_name}"):
         with st.spinner("Generating messages..."):
             followup = generate_followup(data['jd_text'], data['resume_text'])
-            st.success("🎉 Messages generated!")
+            st.markdown("---")
             st.markdown(followup)
+
+if summary:
+    st.markdown("### 📊 Summary of All Candidates")
+    df = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
+    st.dataframe(df)
