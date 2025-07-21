@@ -1,4 +1,3 @@
-
 import openai
 import streamlit as st
 import time
@@ -95,25 +94,45 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
+# Streamlit UI
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
 st.write("Upload a JD and multiple resumes. This tool gives match scores, red flags, and optional messaging.")
 
+# Session init
 if 'results' not in st.session_state:
     st.session_state['results'] = {}
+
+if 'processed_resumes' not in st.session_state:
+    st.session_state['processed_resumes'] = set()
+
+# Reset button
+if st.button("🔄 Start New Matching Session"):
+    st.session_state['results'].clear()
+    st.session_state['processed_resumes'].clear()
+    st.session_state.pop('jd_text', None)
+    st.experimental_rerun()
 
 jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"])
 resume_files = st.file_uploader("📥 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True)
 
-if st.button("Run Matching") and jd_file and resume_files:
-    jd_text = read_file(jd_file)
-    st.session_state['results'].clear()
+# Read JD and store it once
+if jd_file and 'jd_text' not in st.session_state:
+    st.session_state['jd_text'] = read_file(jd_file)
 
+jd_text = st.session_state.get('jd_text', '')
+
+if st.button("Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
+        if resume_file.name in st.session_state['processed_resumes']:
+            continue
+
         resume_text = read_file(resume_file)
         candidate_name = extract_candidate_name(resume_text, resume_file.name)
+
         with st.spinner(f"🔍 Analyzing {candidate_name}..."):
             result = compare_resume(jd_text, resume_text, candidate_name)
+
         st.session_state['results'][resume_file.name] = {
             'candidate': candidate_name,
             'result': result,
@@ -121,11 +140,13 @@ if st.button("Run Matching") and jd_file and resume_files:
             'resume_text': resume_text
         }
 
+        st.session_state['processed_resumes'].add(resume_file.name)
+
+# Display results
 summary = []
 for resume_name, data in st.session_state['results'].items():
     st.markdown("---")
     st.subheader(f"📛 {resume_name}")
-
     st.markdown(data['result'])
 
     try:
