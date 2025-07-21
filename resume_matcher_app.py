@@ -132,11 +132,14 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# ✅ Streamlit UI
+# ✅ Streamlit UI Setup
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
 
+# ✅ Reset state
+if "reset_key" not in st.session_state:
+    st.session_state["reset_key"] = 0
 if "results" not in st.session_state:
     st.session_state["results"] = []
 if "processed_resumes" not in st.session_state:
@@ -146,19 +149,28 @@ if "jd_text" not in st.session_state:
 if "jd_file" not in st.session_state:
     st.session_state["jd_file"] = None
 
+# ✅ Reset Button with session key
 if st.button("🔄 Start New Matching Session"):
     st.session_state.clear()
+    st.session_state["reset_key"] = int(time.time())
     st.experimental_rerun()
 
-jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
-resume_files = st.file_uploader("📄 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
+# ✅ File Uploaders with reset keys
+jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"],
+                           key=f"jd_uploader_{st.session_state['reset_key']}")
 
+resume_files = st.file_uploader("📄 Upload Candidate Resumes", type=["txt", "pdf", "docx"],
+                                accept_multiple_files=True,
+                                key=f"resume_uploader_{st.session_state['reset_key']}")
+
+# ✅ Process JD
 if jd_file and not st.session_state.get("jd_text"):
     st.session_state["jd_text"] = read_file(jd_file)
     st.session_state["jd_file"] = jd_file.name
 
 jd_text = st.session_state.get("jd_text", "")
 
+# ✅ Run Matching
 if st.button("▶️ Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state["processed_resumes"]:
@@ -203,6 +215,7 @@ for entry in st.session_state["results"]:
             st.markdown("---")
             st.markdown(followup)
 
+# ✅ Summary Table
 if summary:
     st.markdown("### 📊 Summary of All Candidates")
     st.dataframe(pd.DataFrame(summary).sort_values(by="Score", ascending=False))
