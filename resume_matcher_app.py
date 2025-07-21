@@ -5,6 +5,7 @@ import fitz  # PyMuPDF
 import docx
 import pandas as pd
 import re
+import io
 from PyPDF2 import PdfReader
 
 # ✅ Secure OpenAI API Client
@@ -78,13 +79,20 @@ def extract_candidate_name(resume_text, filename):
         if any(k in line.lower() for k in exclude_keywords):
             continue
         words = line.strip().split()
-        if 2 <= len(words) <= 5 and all(w[0].isupper() for w in words if w.isalpha()) and line.istitle():
+        if (
+            2 <= len(words) <= 5 and
+            all(w[0].isupper() for w in words if w.isalpha()) and
+            not any(term.lower() in line.lower() for term in [
+                "institute", "consultant", "engineer", "developer",
+                "solutions", "summary", "project", "objective"
+            ])
+        ):
             name_candidates.append(line.strip())
 
     if name_candidates:
         return name_candidates[0].title()
 
-    # Filename fallback
+    # Fallback to filename
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-.]", " ", name)
     name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID \d+|Backend|Developer|Engineer|SW|Resources|Center|Hubware|V\d+)\b", "", name, flags=re.I)
@@ -132,14 +140,12 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# ✅ Streamlit UI Setup
+# ✅ Streamlit UI
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
 
-# ✅ Init session state
-if "reset_key" not in st.session_state:
-    st.session_state["reset_key"] = 0
+# Session State
 if "results" not in st.session_state:
     st.session_state["results"] = []
 if "processed_resumes" not in st.session_state:
@@ -149,7 +155,7 @@ if "jd_text" not in st.session_state:
 if "jd_file" not in st.session_state:
     st.session_state["jd_file"] = None
 
-# ✅ Reset Session Button
+# Reset Button
 if st.button("🔄 Start New Matching Session"):
     st.session_state.pop("results", None)
     st.session_state.pop("processed_resumes", None)
@@ -158,21 +164,17 @@ if st.button("🔄 Start New Matching Session"):
     st.session_state["reset_key"] = int(time.time())
     st.rerun()
 
-# ✅ Uploaders
-jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"],
-                           key=f"jd_uploader_{st.session_state['reset_key']}")
-resume_files = st.file_uploader("📄 Upload Candidate Resumes", type=["txt", "pdf", "docx"],
-                                accept_multiple_files=True,
-                                key=f"resume_uploader_{st.session_state['reset_key']}")
+# Upload JD and Resumes
+jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
+resume_files = st.file_uploader("📄 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
 
-# ✅ Read JD
 if jd_file and not st.session_state.get("jd_text"):
     st.session_state["jd_text"] = read_file(jd_file)
     st.session_state["jd_file"] = jd_file.name
 
 jd_text = st.session_state.get("jd_text", "")
 
-# ✅ Run Matching
+# Run Matching
 if st.button("▶️ Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state["processed_resumes"]:
@@ -194,7 +196,7 @@ if st.button("▶️ Run Matching") and jd_text and resume_files:
         })
         st.session_state["processed_resumes"].add(resume_file.name)
 
-# ✅ Display Results
+# ✅ Results Display
 summary = []
 for entry in st.session_state["results"]:
     st.markdown("---")
@@ -217,15 +219,19 @@ for entry in st.session_state["results"]:
             st.markdown("---")
             st.markdown(followup)
 
-# ✅ Summary Table + Download
+# ✅ Summary Table + Excel Export
 if summary:
-    df_summary = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
     st.markdown("### 📊 Summary of All Candidates")
+    df_summary = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
     st.dataframe(df_summary)
+
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        df_summary.to_excel(writer, index=False)
 
     st.download_button(
         label="📥 Download Summary as Excel",
-        data=df_summary.to_excel(index=False, engine='openpyxl'),
+        data=excel_buffer.getvalue(),
         file_name="resume_match_summary.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
