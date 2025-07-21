@@ -1,4 +1,4 @@
 openai
 streamlit
+PyMuPDF
 python-docx
-PyPDF2
