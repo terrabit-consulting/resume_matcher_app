@@ -1,4 +1,3 @@
-
 import openai
 import streamlit as st
 import time
@@ -6,17 +5,6 @@ import fitz  # PyMuPDF
 import docx
 import pandas as pd
 import re
-import spacy
-import subprocess
-import importlib
-
-# Load spaCy English model with fallback installation
-try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    with st.spinner("Downloading spaCy model..."):
-        subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"], check=True)
-        nlp = spacy.load("en_core_web_sm")
 
 # ——— OpenAI Client ———
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -45,32 +33,25 @@ def call_gpt_with_fallback(prompt):
 
 # ——— Name Extraction ———
 def clean_filename_name(name: str) -> str:
+    # Replace underscores/dots/hyphens with spaces and title-case
     name = re.sub(r"[_\-.]+", " ", name)
     return name.strip().title()
 
 def extract_candidate_name(resume_text: str, filename: str) -> str:
     lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
 
-    for i in range(len(lines) - 1):
-        if "candidate name" in lines[i].lower():
-            possible_name = lines[i + 1].strip()
-            if len(possible_name.split()) >= 2 and len(possible_name) < 40:
-                return possible_name
-
-    for line in lines[:15]:
+    # 1) Look for explicit "Name: X" in top lines
+    for line in lines[:10]:
         if "name:" in line.lower():
             return line.split(":", 1)[1].strip()
 
-    for line in lines[:10]:
-        if 2 <= len(line.split()) <= 4 and all(c.isalnum() or c.isspace() for c in line):
-            return line
+    # 2) Heuristic: first non-empty line of up to 5 words
+    if lines and len(lines[0].split()) <= 5:
+        return lines[0]
 
-    doc = nlp(resume_text)
-    for ent in doc.ents:
-        if ent.label_ == "PERSON" and len(ent.text.split()) <= 4:
-            return ent.text
-
-    return "Unknown"
+    # 3) Fallback to cleaned filename
+    base = filename.rsplit(".", 1)[0]
+    return clean_filename_name(base)
 
 # ——— Core Prompts ———
 def compare_resume(jd_text, resume_text, candidate_name):
@@ -79,7 +60,7 @@ You are a Recruiter Assistant bot.
 
 Compare the following resume to the job description and return the result in the following format:
 
-💼 **Name**: {candidate_name}
+📛 **Name**: {candidate_name}
 ✅ **Score**: [Match Score]%
 
 🔧 **Reason**:
@@ -136,45 +117,52 @@ st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
 st.write("Upload a JD and multiple resumes. This tool gives match scores, red flags, and optional messaging.")
 
+# ——— Session State Initialization ———
 if 'results' not in st.session_state:
     st.session_state['results'] = {}
 
 if 'processed_resumes' not in st.session_state:
     st.session_state['processed_resumes'] = set()
 
+# ——— Reset Button ———
 if st.button("🔄 Start New Matching Session"):
     st.session_state['results'].clear()
     st.session_state['processed_resumes'].clear()
     st.session_state.pop('jd_text', None)
     st.rerun()
 
+# ——— File Uploaders ———
 jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"])
 resume_files = st.file_uploader(
-    "📅 Upload Candidate Resumes",
+    "📥 Upload Candidate Resumes",
     type=["txt", "pdf", "docx"],
     accept_multiple_files=True
 )
 
+# ——— Cache JD Text Once ———
 if jd_file and 'jd_text' not in st.session_state:
     st.session_state['jd_text'] = read_file(jd_file)
 
 jd_text = st.session_state.get('jd_text', '')
 
+# ——— Main Matching Logic ———
 if st.button("Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state['processed_resumes']:
             continue
 
         resume_text = read_file(resume_file)
+        # 1. Initial extraction
         candidate_name = extract_candidate_name(resume_text, resume_file.name)
-
+        # 2. GPT-based comparison
         with st.spinner(f"🔍 Analyzing {candidate_name}..."):
             result = compare_resume(jd_text, resume_text, candidate_name)
-
+        # 3. Override name from GPT output if present
         m = re.search(r"\*\*Name\*\*:\s*(.+)", result)
         if m:
             candidate_name = m.group(1).strip()
 
+        # 4. Store results & mark processed
         st.session_state['results'][resume_file.name] = {
             'candidate': candidate_name,
             'result': result,
@@ -183,12 +171,14 @@ if st.button("Run Matching") and jd_text and resume_files:
         }
         st.session_state['processed_resumes'].add(resume_file.name)
 
+# ——— Display Results ———
 summary = []
 for fname, data in st.session_state['results'].items():
     st.markdown("---")
-    st.subheader(f"💼 {data['candidate']}")
+    st.subheader(f"📛 {data['candidate']}")
     st.markdown(data['result'])
 
+    # Extract numeric score
     try:
         line = next(l for l in data['result'].splitlines() if "Score" in l)
         score = int(re.search(r"(\d+)%", line).group(1))
@@ -210,6 +200,7 @@ for fname, data in st.session_state['results'].items():
             st.markdown("---")
             st.markdown(followup)
 
+# ——— Summary Table ———
 if summary:
     st.markdown("### 📊 Summary of All Candidates")
     df = pd.DataFrame(summary).sort_values("Score", ascending=False).reset_index(drop=True)
