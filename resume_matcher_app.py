@@ -1,4 +1,4 @@
-# ✅ Final cleaned and complete version of resume_matcher_app.py (with optional spaCy fallback)
+# ✅ Final cleaned and complete version of resume_matcher_app.py with robust spaCy handling
 import openai
 import streamlit as st
 import time
@@ -7,8 +7,8 @@ import docx
 import pandas as pd
 import re
 
-# Optional spaCy fallback if enabled
-try:
+# ✅ Optional spaCy fallback with auto-download on Streamlit Cloud
+ttry:
     import spacy
     try:
         nlp = spacy.load("en_core_web_sm")
@@ -138,7 +138,7 @@ if st.button("🔄 Start New Matching Session"):
     st.session_state['results'].clear()
     st.session_state['processed_resumes'].clear()
     st.session_state.pop('jd_text', None)
-    st.rerun()
+    st.experimental_rerun()
 
 jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"])
 resume_files = st.file_uploader("📥 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True)
