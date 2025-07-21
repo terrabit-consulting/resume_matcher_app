@@ -61,24 +61,29 @@ def read_file(file):
 # ----------------------------
 # ✅ Extract Candidate Name
 # ----------------------------
-def extract_candidate_name(text, filename):
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    patterns = [
-        r"(?i)^\s*(full\s*name|name)\s*[:\-\s]+([A-Z][a-z]+(\s+[A-Z][a-z]+){0,3})",
-        r"(?i)(resume|cv)\s+of[:\-\s]*([A-Z][a-z]+(\s+[A-Z][a-z]+){0,3})",
-        r"(?i)^presented by\s*[:\-\s]*([A-Z][a-z]+(\s+[A-Z][a-z]+){0,3})",
-    ]
-    for line in lines[:20] + lines[-10:]:
-        for pattern in patterns:
-            match = re.search(pattern, line.strip())
+def extract_candidate_name(resume_text, filename):
+    lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
+
+    for line in lines[:20]:
+        lower = line.lower()
+        if any(key in lower for key in ["name:", "full name", "candidate name", "resume of"]):
+            match = re.search(r"(name|full name|candidate name|resume of)[:\-]?\s*(.+)", lower, re.IGNORECASE)
             if match:
-                return match.group(len(match.groups())).strip()
+                name_line = match.group(2).strip()
+                name_line = re.sub(r",?\s*(b\.?e|m\.?tech|msc|mba|developer|engineer|analyst).*", "", name_line, flags=re.I)
+                return name_line.title()
+
+    for line in lines:
+        if line.isupper() and 2 <= len(line.split()) <= 4:
+            return line.title()
 
     for line in lines[:10]:
-        if len(line.split()) <= 5 and line.istitle():
-            return line.strip()
+        if 2 <= len(line.split()) <= 4 and re.match(r"^[A-Za-z\s]+$", line):
+            return line.title()
 
-    name = re.sub(r"[_\-.]+", " ", filename.replace(".pdf", "").replace(".docx", "").replace(".txt", ""))
+    name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
+    name = re.sub(r"[_\-.]", " ", name)
+    name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID \d+)\b", "", name, flags=re.I)
     return name.strip().title()
 
 # ----------------------------
@@ -133,39 +138,23 @@ st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
 st.write("Upload a JD and multiple resumes. This tool gives match scores, red flags, and optional messaging.")
 
-# ----------------------------
-# ✅ Session State Init
-# ----------------------------
 if "results" not in st.session_state:
     st.session_state["results"] = []
-
 if "processed_resumes" not in st.session_state:
     st.session_state["processed_resumes"] = set()
 
-# ----------------------------
-# 🔄 Reset Button
-# ----------------------------
 if st.button("🔄 Start New Matching Session"):
     st.session_state.clear()
     st.rerun()
 
-# ----------------------------
-# 📄 Upload JD + Resumes
-# ----------------------------
 jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"])
 resume_files = st.file_uploader("📄 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True)
 
-# ----------------------------
-# 📝 Read JD text
-# ----------------------------
 if jd_file and "jd_text" not in st.session_state:
     st.session_state["jd_text"] = read_file(jd_file)
 
 jd_text = st.session_state.get("jd_text", "")
 
-# ----------------------------
-# ▶️ Run Resume Matching
-# ----------------------------
 if st.button("Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state["processed_resumes"]:
@@ -183,7 +172,7 @@ if st.button("Run Matching") and jd_text and resume_files:
             if len(name_candidate.split()) <= 5 and not name_candidate.lower().startswith("bachelor"):
                 candidate_name = name_candidate
 
-        score_match = re.search(r"Score\*\*: *([0-9]+)%", result)
+        score_match = re.search(r"Score\*\*: \**([0-9]+)%", result)
         score = int(score_match.group(1)) if score_match else 0
 
         st.session_state["results"].append({
@@ -195,9 +184,6 @@ if st.button("Run Matching") and jd_text and resume_files:
 
         st.session_state["processed_resumes"].add(resume_file.name)
 
-# ----------------------------
-# 📊 Show Results
-# ----------------------------
 summary = []
 for entry in st.session_state["results"]:
     st.markdown("---")
