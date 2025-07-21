@@ -1,3 +1,4 @@
+# ✅ Final cleaned and complete version of resume_matcher_app.py (with optional spaCy fallback)
 import openai
 import streamlit as st
 import time
@@ -6,7 +7,14 @@ import docx
 import pandas as pd
 import re
 
-# ——— OpenAI Client ———
+# Optional spaCy fallback if enabled
+try:
+    import spacy
+    nlp = spacy.load("en_core_web_sm")
+except Exception:
+    nlp = None
+
+# ✅ OpenAI API setup
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 def call_gpt_with_fallback(prompt):
@@ -18,7 +26,7 @@ def call_gpt_with_fallback(prompt):
         )
         return resp.choices[0].message.content.strip()
     except Exception as e:
-        st.warning(f"⚠️ GPT-4o failed ({e}). Falling back to GPT-3.5-turbo...")
+        st.warning(f"GPT-4o failed: {e}. Falling back to GPT-3.5-turbo...")
         time.sleep(1)
         try:
             resp = client.chat.completions.create(
@@ -28,32 +36,29 @@ def call_gpt_with_fallback(prompt):
             )
             return resp.choices[0].message.content.strip()
         except Exception as e2:
-            st.error(f"❌ Both models failed: {e2}")
+            st.error(f"Both models failed: {e2}")
             return "⚠️ API Error - unable to generate response."
 
-# ——— Name Extraction ———
+# ✅ Name extraction helpers
 def clean_filename_name(name: str) -> str:
-    # Replace underscores/dots/hyphens with spaces and title-case
     name = re.sub(r"[_\-.]+", " ", name)
     return name.strip().title()
 
 def extract_candidate_name(resume_text: str, filename: str) -> str:
     lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
-
-    # 1) Look for explicit "Name: X" in top lines
     for line in lines[:10]:
         if "name:" in line.lower():
             return line.split(":", 1)[1].strip()
-
-    # 2) Heuristic: first non-empty line of up to 5 words
     if lines and len(lines[0].split()) <= 5:
         return lines[0]
+    if nlp:
+        doc = nlp(resume_text[:500])
+        for ent in doc.ents:
+            if ent.label_ == "PERSON":
+                return ent.text
+    return clean_filename_name(filename.rsplit(".", 1)[0])
 
-    # 3) Fallback to cleaned filename
-    base = filename.rsplit(".", 1)[0]
-    return clean_filename_name(base)
-
-# ——— Core Prompts ———
+# ✅ GPT prompts
 def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
 You are a Recruiter Assistant bot.
@@ -93,7 +98,7 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# ——— File Readers ———
+# ✅ File handling
 def read_pdf(file):
     text = ""
     pdf = fitz.open(stream=file.read(), filetype="pdf")
@@ -108,61 +113,47 @@ def read_docx(file):
 def read_file(file):
     if file.type == "application/pdf":
         return read_pdf(file)
-    if file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    elif file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         return read_docx(file)
-    return file.read().decode("utf-8", errors="ignore")
+    else:
+        return file.read().decode("utf-8", errors="ignore")
 
-# ——— Streamlit UI Setup ———
+# ✅ Streamlit UI
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
 st.write("Upload a JD and multiple resumes. This tool gives match scores, red flags, and optional messaging.")
 
-# ——— Session State Initialization ———
 if 'results' not in st.session_state:
     st.session_state['results'] = {}
 
 if 'processed_resumes' not in st.session_state:
     st.session_state['processed_resumes'] = set()
 
-# ——— Reset Button ———
 if st.button("🔄 Start New Matching Session"):
     st.session_state['results'].clear()
     st.session_state['processed_resumes'].clear()
     st.session_state.pop('jd_text', None)
     st.rerun()
 
-# ——— File Uploaders ———
 jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"])
-resume_files = st.file_uploader(
-    "📥 Upload Candidate Resumes",
-    type=["txt", "pdf", "docx"],
-    accept_multiple_files=True
-)
+resume_files = st.file_uploader("📥 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True)
 
-# ——— Cache JD Text Once ———
 if jd_file and 'jd_text' not in st.session_state:
     st.session_state['jd_text'] = read_file(jd_file)
 
 jd_text = st.session_state.get('jd_text', '')
 
-# ——— Main Matching Logic ———
 if st.button("Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state['processed_resumes']:
             continue
-
         resume_text = read_file(resume_file)
-        # 1. Initial extraction
         candidate_name = extract_candidate_name(resume_text, resume_file.name)
-        # 2. GPT-based comparison
         with st.spinner(f"🔍 Analyzing {candidate_name}..."):
             result = compare_resume(jd_text, resume_text, candidate_name)
-        # 3. Override name from GPT output if present
         m = re.search(r"\*\*Name\*\*:\s*(.+)", result)
         if m:
             candidate_name = m.group(1).strip()
-
-        # 4. Store results & mark processed
         st.session_state['results'][resume_file.name] = {
             'candidate': candidate_name,
             'result': result,
@@ -171,14 +162,12 @@ if st.button("Run Matching") and jd_text and resume_files:
         }
         st.session_state['processed_resumes'].add(resume_file.name)
 
-# ——— Display Results ———
 summary = []
 for fname, data in st.session_state['results'].items():
     st.markdown("---")
     st.subheader(f"📛 {data['candidate']}")
     st.markdown(data['result'])
 
-    # Extract numeric score
     try:
         line = next(l for l in data['result'].splitlines() if "Score" in l)
         score = int(re.search(r"(\d+)%", line).group(1))
@@ -200,7 +189,6 @@ for fname, data in st.session_state['results'].items():
             st.markdown("---")
             st.markdown(followup)
 
-# ——— Summary Table ———
 if summary:
     st.markdown("### 📊 Summary of All Candidates")
     df = pd.DataFrame(summary).sort_values("Score", ascending=False).reset_index(drop=True)
