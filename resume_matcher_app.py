@@ -61,20 +61,22 @@ def read_file(file):
 # ----------------------------
 # ✅ Extract Candidate Name
 # ----------------------------
-def extract_candidate_name(resume_text, filename):
-    lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
+def extract_candidate_name(text, filename):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    patterns = [
+        r"(?i)^\s*(full\s*name|name)\s*[:\-\s]+([A-Z][a-z]+(\s+[A-Z][a-z]+){0,3})",
+        r"(?i)(resume|cv)\s+of[:\-\s]*([A-Z][a-z]+(\s+[A-Z][a-z]+){0,3})",
+        r"(?i)^presented by\s*[:\-\s]*([A-Z][a-z]+(\s+[A-Z][a-z]+){0,3})",
+    ]
+    for line in lines[:20] + lines[-10:]:
+        for pattern in patterns:
+            match = re.search(pattern, line.strip())
+            if match:
+                return match.group(len(match.groups())).strip()
 
     for line in lines[:10]:
-        if "name:" in line.lower():
-            return line.split(":", 1)[1].strip()
-
-    for line in lines[:15]:
-        match = re.search(r"(resume|cv)\s+of[:\-]?\s*(.+)", line, re.IGNORECASE)
-        if match:
-            return match.group(2).strip()
-
-    if len(lines) > 0 and 2 <= len(lines[0].split()) <= 5:
-        return lines[0]
+        if len(line.split()) <= 5 and line.istitle():
+            return line.strip()
 
     name = re.sub(r"[_\-.]+", " ", filename.replace(".pdf", "").replace(".docx", "").replace(".txt", ""))
     return name.strip().title()
@@ -148,7 +150,7 @@ if st.button("🔄 Start New Matching Session"):
     st.rerun()
 
 # ----------------------------
-# 📤 Upload JD + Resumes
+# 📄 Upload JD + Resumes
 # ----------------------------
 jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"])
 resume_files = st.file_uploader("📄 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True)
@@ -175,18 +177,15 @@ if st.button("Run Matching") and jd_text and resume_files:
         with st.spinner(f"🔍 Analyzing {candidate_name}..."):
             result = compare_resume(jd_text, resume_text, candidate_name)
 
-        # Extract better name if GPT returned one
         match = re.search(r"\*\*Name\*\*:\s*(.+)", result)
         if match:
             name_candidate = match.group(1).strip()
             if len(name_candidate.split()) <= 5 and not name_candidate.lower().startswith("bachelor"):
                 candidate_name = name_candidate
 
-        # Extract Score
-        score_match = re.search(r"Score\*\*:\s*([0-9]+)%", result)
+        score_match = re.search(r"Score\*\*: *([0-9]+)%", result)
         score = int(score_match.group(1)) if score_match else 0
 
-        # Store result
         st.session_state["results"].append({
             "name": candidate_name,
             "score": score,
