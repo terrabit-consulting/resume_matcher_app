@@ -1,3 +1,4 @@
+
 import openai
 import streamlit as st
 import time
@@ -6,9 +7,16 @@ import docx
 import pandas as pd
 import re
 import spacy
+import subprocess
+import importlib
 
-# Load spaCy English model
-nlp = spacy.load("en_core_web_sm")
+# Load spaCy English model with fallback installation
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    with st.spinner("Downloading spaCy model..."):
+        subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"], check=True)
+        nlp = spacy.load("en_core_web_sm")
 
 # ——— OpenAI Client ———
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
