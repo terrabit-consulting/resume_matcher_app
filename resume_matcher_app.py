@@ -190,7 +190,7 @@ Resume:
 
 # ------------------- Streamlit UI -------------------
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
-st.title("Terrabit Consulting - Intelligent Resume and Job Description Matching System")
+st.title("Terrabit Consulting Talent Match System")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
 
 if "results" not in st.session_state:
