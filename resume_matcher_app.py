@@ -16,7 +16,7 @@ st.write("Upload a JD and multiple resumes. Get match scores, red flags, and fol
 
 try:
     client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-    st.success("✅ OpenAI client initialized")
+   # st.success("✅ OpenAI client initialized")
 except Exception as e:
     st.error(f"❌ OpenAI init failed: {e}")
 
@@ -30,7 +30,7 @@ def load_spacy_model():
         return spacy.load("en_core_web_sm")
 
 nlp = load_spacy_model()
-st.success("✅ spaCy model loaded")
+# st.success("✅ spaCy model loaded")
 
 def call_gpt_with_fallback(prompt):
     try:
