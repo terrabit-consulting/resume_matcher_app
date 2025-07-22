@@ -83,42 +83,46 @@ def extract_candidate_name(resume_text, filename):
     return name.strip().title()
 
 def compare_resume(jd_text, resume_text, candidate_name):
-    prompt = f"""You are a Recruiter Assistant bot.
+    prompt = f"""
+You are a Recruiter Assistant bot.
 
 Compare the following resume to the job description and return the result in the following format:
 
-💼 **Name**: {candidate_name}
-✅ **Score**: [Match Score]%
+**Name**: {candidate_name}
+**Score**: [Match Score]%
 
-🔧 **Reason**:
-- ⚠️ **Role Match**: (Brief explanation)
-- ✅ **Skill Match**: (Matched or missing skills)
-- ❌ **Major Gaps**: (What is completely missing or irrelevant)
+**Reason**:
+- Role Match: (Brief explanation)
+- Skill Match: (Matched or missing skills)
+- Major Gaps: (What is completely missing or irrelevant)
 
-⚠️ **Warning**: Add only if score < 70%
+Warning: Add only if score < 70%
 
 Job Description:
 {jd_text}
 
 Resume:
-{resume_text}"""
+{resume_text}
+"""
     return call_gpt_with_fallback(prompt)
 
 def generate_followup(jd_text, resume_text):
-    prompt = f"""Based on the resume and job description below, generate:
-1. 📱 WhatsApp message (casual)
-2. 📧 Email message (formal)
-3. 🧠 Screening questions (3-5)
+    prompt = f"""
+Based on the resume and job description below, generate:
+1. WhatsApp message (casual)
+2. Email message (formal)
+3. Screening questions (3-5)
 
 Job Description:
 {jd_text}
 
 Resume:
-{resume_text}"""
+{resume_text}
+"""
     return call_gpt_with_fallback(prompt)
 
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
-st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
+st.title("Resume Matcher Bot")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
 
 if "results" not in st.session_state:
@@ -130,12 +134,12 @@ if "jd_text" not in st.session_state:
 if "jd_file" not in st.session_state:
     st.session_state["jd_file"] = None
 
-if st.button("🔄 Start New Matching Session"):
+if st.button("Start New Matching Session"):
     st.session_state.clear()
     st.rerun()
 
-jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
-resume_files = st.file_uploader("📄 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
+jd_file = st.file_uploader("Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
+resume_files = st.file_uploader("Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
 
 if jd_file and not st.session_state.get("jd_text"):
     st.session_state["jd_text"] = read_file(jd_file)
@@ -143,14 +147,14 @@ if jd_file and not st.session_state.get("jd_text"):
 
 jd_text = st.session_state.get("jd_text", "")
 
-if st.button("▶️ Run Matching") and jd_text and resume_files:
+if st.button("Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state["processed_resumes"]:
             continue
         resume_text = read_file(resume_file)
         candidate_name = extract_candidate_name(resume_text, resume_file.name)
 
-        with st.spinner(f"🔍 Analyzing {candidate_name}..."):
+        with st.spinner(f"Analyzing {candidate_name}..."):
             result = compare_resume(jd_text, resume_text, candidate_name)
 
         score_match = re.search(r"Score\*\*: \**([0-9]+)%", result)
@@ -167,27 +171,27 @@ if st.button("▶️ Run Matching") and jd_text and resume_files:
 summary = []
 for entry in st.session_state["results"]:
     st.markdown("---")
-    st.subheader(f"💼 {entry['name']}")
+    st.subheader(f"Candidate: {entry['name']}")
     st.markdown(entry["result"])
 
     score = entry["score"]
     if score < 50:
-        st.error("❌ Not suitable – Major role mismatch")
+        st.error("Not suitable – Major role mismatch")
     elif score < 70:
-        st.warning("⚠️ Consider with caution – Some relevant experience but lacks core skills")
+        st.warning("Consider with caution – Lacks core skills")
     else:
-        st.success("✅ Strong match – Good alignment with JD")
+        st.success("Strong match – Good alignment with JD")
 
     summary.append({"Candidate": entry["name"], "Score": score})
 
-    if st.button(f"📩 Generate Follow-up for {entry['name']}", key=f"followup_{entry['name']}"):
+    if st.button(f"Generate Follow-up for {entry['name']}", key=f"followup_{entry['name']}"):
         with st.spinner("Generating messages..."):
             followup = generate_followup(jd_text, entry["resume_text"])
             st.markdown("---")
             st.markdown(followup)
 
 if summary:
-    st.markdown("### 📊 Summary of All Candidates")
+    st.markdown("### Summary of All Candidates")
     df_summary = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
     st.dataframe(df_summary)
 
@@ -196,7 +200,7 @@ if summary:
         df_summary.to_excel(writer, index=False)
 
     st.download_button(
-        label="📥 Download Summary as Excel",
+        label="Download Summary as Excel",
         data=excel_buffer.getvalue(),
         file_name="resume_match_summary.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
