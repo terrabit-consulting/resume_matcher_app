@@ -13,9 +13,10 @@ def load_spacy_model():
     return spacy.load("en_core_web_sm")
 
 nlp = load_spacy_model()
+
+# --- Secure OpenAI Client ---
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# GPT Fallback
 def call_gpt_with_fallback(prompt):
     try:
         response = client.chat.completions.create(
@@ -25,10 +26,10 @@ def call_gpt_with_fallback(prompt):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        st.error(f"❌ GPT-4o failed. {str(e)}")
-        return "⚠️ GPT processing failed."
+        st.error(f"\u274c GPT-4o failed. {str(e)}")
+        return "\u26a0\ufe0f GPT processing failed."
 
-# File Readers
+# --- File Readers ---
 def read_pdf(file):
     text = ""
     with fitz.open(stream=file.read(), filetype="pdf") as doc:
@@ -48,53 +49,39 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
-# Extract Name
+# --- Name and Email Extractors ---
 def extract_candidate_name(text, filename):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    geo_words = {
-        "tamil nadu", "kerala", "delhi", "kuala lumpur", "malaysia", "bangalore",
-        "hyderabad", "india", "chennai", "selangor", "maharashtra"
-    }
 
     for i, line in enumerate(lines):
-        if re.search(r"(?i)^(candidate\s+)?name\s*[:\-]", line):
-            name = re.split(r"[:\-]", line, 1)[-1].strip()
-            if 2 <= len(name.split()) <= 4 and not any(g in name.lower() for g in geo_words):
-                return name.title()
-        if re.search(r"(?i)^candidate name$", line) and i + 1 < len(lines):
+        if re.search(r"Candidate Name\\s*$", line, re.IGNORECASE) and i + 1 < len(lines):
             next_line = lines[i + 1].strip()
-            if 2 <= len(next_line.split()) <= 4 and not any(g in next_line.lower() for g in geo_words):
+            if 2 <= len(next_line.split()) <= 4:
                 return next_line.title()
 
-    for line in lines[:10]:
-        if (2 <= len(line.split()) <= 4 and
-            re.match(r"^[A-Z][a-z]+(\s+[A-Z][a-z]+)+$", line.strip()) and
-            not re.search(r"(Project|Engineer|Developer|Test|Resume|Manager|Curriculum|Tamil Nadu|Chennai|India)", line, re.IGNORECASE)):
-            return line.strip().title()
+    for line in lines:
+        if re.search(r"(Candidate Name|Name)\\s*[:\-]", line, re.IGNORECASE):
+            name_part = re.split(r"[:\-]", line, 1)[-1].strip()
+            if 2 <= len(name_part.split()) <= 4 and not re.search(r"(Tester|Engineer|Developer|Manager|Resume|CV)", name_part, re.IGNORECASE):
+                return name_part.title()
 
     sample_text = "\n".join(lines[:15] + lines[-15:])
     doc = nlp(sample_text)
     for ent in doc.ents:
-        if ent.label_ == "PERSON":
-            name = ent.text.strip().title()
-            if 2 <= len(name.split()) <= 4 and not any(g in name.lower() for g in geo_words):
-                return name
+        if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4:
+            return ent.text.strip().title()
 
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-.]", " ", name)
-    name = re.sub(r"\b(Resume|CV|Developer|Engineer|Terrabit|Consulting|V\d+|ID\d+)\b", "", name, flags=re.I)
+    name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID \d+|Developer|Engineer|V\d+)\b", "", name, flags=re.I)
     name = re.sub(r"\s+", " ", name)
-    name = name.strip().title()
-    if any(g in name.lower() for g in geo_words):
-        return "Name Not Found"
-    return name
+    return name.strip().title()
 
-# Extract Email
 def extract_email(text):
-    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
+    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", text)
     return match.group() if match else "Not found"
 
-# JD-Resume Comparator
+# --- Resume Comparator ---
 def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
 You are a Recruiter Assistant bot.
@@ -119,7 +106,6 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# Follow-up Generator
 def generate_followup(jd_text, resume_text):
     prompt = f"""
 Based on the resume and job description below, generate:
@@ -135,7 +121,7 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# Streamlit UI
+# --- Streamlit UI ---
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("Resume Matcher Bot")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
@@ -162,12 +148,10 @@ if jd_file and not st.session_state.get("jd_text"):
 
 jd_text = st.session_state.get("jd_text", "")
 
-# Matching Logic
 if st.button("Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state["processed_resumes"]:
             continue
-
         resume_text = read_file(resume_file)
         correct_name = extract_candidate_name(resume_text, resume_file.name)
         correct_email = extract_email(resume_text)
@@ -187,7 +171,6 @@ if st.button("Run Matching") and jd_text and resume_files:
         })
         st.session_state["processed_resumes"].add(resume_file.name)
 
-# Display Results
 summary = []
 for entry in st.session_state["results"]:
     st.markdown("---")
@@ -203,11 +186,7 @@ for entry in st.session_state["results"]:
     else:
         st.success("Strong match – Good alignment with JD")
 
-    summary.append({
-        "Candidate": entry["name"],
-        "Email": entry["email"],
-        "Score": score
-    })
+    summary.append({"Candidate": entry["name"], "Email": entry["email"], "Score": score})
 
     if st.button(f"Generate Follow-up for {entry['name']}", key=f"followup_{entry['name']}"):
         with st.spinner("Generating messages..."):
@@ -215,7 +194,6 @@ for entry in st.session_state["results"]:
             st.markdown("---")
             st.markdown(followup)
 
-# Summary Table
 if summary:
     st.markdown("### Summary of All Candidates")
     df_summary = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
