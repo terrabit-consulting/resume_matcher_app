@@ -210,7 +210,8 @@ for entry in st.session_state["results"]:
     else:
         st.success("Strong match – Good alignment with JD")
 
-    if st.button(f"Generate Follow-up for {entry['name']}", key=f"followup_{entry['name']}"):
+    if st.button(f"Generate Follow-up for {entry['correct_name']}", key=f"followup_{entry['correct_name']}"):
+   # if st.button(f"Generate Follow-up for {entry['name']}", key=f"followup_{entry['name']}"):
         with st.spinner("Generating messages..."):
             followup = generate_followup(jd_text, entry["resume_text"])
             st.markdown("---")
