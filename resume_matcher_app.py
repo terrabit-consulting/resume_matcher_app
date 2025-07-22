@@ -13,7 +13,7 @@ def load_spacy_model():
     return spacy.load("en_core_web_sm")
 
 nlp = load_spacy_model()
-from PyPDF2 import PdfReader
+# from PyPDF2 import PdfReader
 
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
