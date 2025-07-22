@@ -1,4 +1,3 @@
-
 import openai
 import streamlit as st
 import time
@@ -8,10 +7,16 @@ import pandas as pd
 import re
 import io
 import spacy
+
+@st.cache_resource
+def load_spacy_model():
+    return spacy.load("en_core_web_sm")
+
+nlp = load_spacy_model()
 from PyPDF2 import PdfReader
 
 # Load spaCy model
-nlp = spacy.load("en_core_web_sm")
+# nlp loading is now cached above
 
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
