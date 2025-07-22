@@ -1,4 +1,3 @@
-
 import openai
 import streamlit as st
 import time
@@ -14,6 +13,8 @@ def load_spacy_model():
     return spacy.load("en_core_web_sm")
 
 nlp = load_spacy_model()
+
+# --- Secure OpenAI Client ---
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 def call_gpt_with_fallback(prompt):
@@ -25,19 +26,10 @@ def call_gpt_with_fallback(prompt):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        st.warning(f"⚠️ GPT-4o failed: {str(e)}. Falling back to GPT-3.5...")
-        time.sleep(1)
-        try:
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e2:
-            st.error(f"❌ GPT failed. {str(e2)}")
-            return "⚠️ GPT processing failed."
+        st.error(f"❌ GPT-4o failed. {str(e)}")
+        return "⚠️ GPT processing failed."
 
+# --- File Readers ---
 def read_pdf(file):
     text = ""
     with fitz.open(stream=file.read(), filetype="pdf") as doc:
@@ -57,6 +49,7 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
+# --- Name and Email Extractors ---
 def extract_candidate_name(text, filename):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
 
@@ -69,7 +62,7 @@ def extract_candidate_name(text, filename):
     for line in lines:
         if re.search(r"(Candidate Name|Name)\s*[:\-]", line, re.IGNORECASE):
             name_part = re.split(r"[:\-]", line, 1)[-1].strip()
-            if 2 <= len(name_part.split()) <= 4:
+            if 2 <= len(name_part.split()) <= 4 and not re.search(r"(Tester|Engineer|Developer|Manager)", name_part, re.IGNORECASE):
                 return name_part.title()
 
     sample_text = "\n".join(lines[:15] + lines[-15:])
@@ -80,14 +73,15 @@ def extract_candidate_name(text, filename):
 
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-.]", " ", name)
-    name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID\d+|Engineer|Tester|Developer|Consulting|Sr|Senior|Mr|Ms|DevOps)\b", "", name, flags=re.I)
+    name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID \d+|Developer|Engineer|V\d+)\b", "", name, flags=re.I)
     name = re.sub(r"\s+", " ", name)
-    return name.strip().title() or "Not Found"
+    return name.strip().title()
 
 def extract_email(text):
-    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
+    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", text)
     return match.group() if match else "Not found"
 
+# --- Resume Comparator ---
 def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
 You are a Recruiter Assistant bot.
@@ -127,6 +121,7 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
+# --- Streamlit UI ---
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("Resume Matcher Bot")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
@@ -164,7 +159,7 @@ if st.button("Run Matching") and jd_text and resume_files:
         with st.spinner(f"Analyzing {candidate_name}..."):
             result = compare_resume(jd_text, resume_text, candidate_name)
 
-        score_match = re.search(r"Score\*\*: \*\*?([0-9]+)%", result)
+        score_match = re.search(r"Score\*\*: \**([0-9]+)%", result)
         score = int(score_match.group(1)) if score_match else 0
 
         st.session_state["results"].append({
