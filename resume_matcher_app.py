@@ -51,43 +51,41 @@ def read_file(file):
 # Extract Name
 def extract_candidate_name(text, filename):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    geo_words = {
-        "tamil nadu", "kerala", "delhi", "kuala lumpur", "malaysia", "bangalore",
-        "hyderabad", "india", "chennai", "selangor", "maharashtra"
-    }
 
-    for i, line in enumerate(lines):
-        if re.search(r"(?i)^(candidate\s+)?name\s*[:\-]", line):
-            name = re.split(r"[:\-]", line, 1)[-1].strip()
-            if 2 <= len(name.split()) <= 4 and not any(g in name.lower() for g in geo_words):
-                return name.title()
-        if re.search(r"(?i)^candidate name$", line) and i + 1 < len(lines):
-            next_line = lines[i + 1].strip()
-            if 2 <= len(next_line.split()) <= 4 and not any(g in next_line.lower() for g in geo_words):
-                return next_line.title()
-
-    for line in lines[:10]:
-        if (2 <= len(line.split()) <= 4 and
-            re.match(r"^[A-Z][a-z]+(\s+[A-Z][a-z]+)+$", line.strip()) and
-            not re.search(r"(Project|Engineer|Developer|Test|Resume|Manager|Curriculum|Tamil Nadu|Chennai|India)", line, re.IGNORECASE)):
-            return line.strip().title()
-
+    # 📌 Use spaCy's NER to detect proper names
     sample_text = "\n".join(lines[:15] + lines[-15:])
     doc = nlp(sample_text)
+
     for ent in doc.ents:
         if ent.label_ == "PERSON":
-            name = ent.text.strip().title()
-            if 2 <= len(name.split()) <= 4 and not any(g in name.lower() for g in geo_words):
-                return name
+            name = ent.text.strip()
+            if (
+                2 <= len(name.split()) <= 4 and
+                all(w[0].isupper() and not w.isupper() for w in name.split()) and
+                not any(len(w) <= 1 for w in name.split()) and
+                len(re.findall(r"\d", name)) == 0
+            ):
+                return name.title()
 
+    # 🔁 Fallback: Check top lines for name-like patterns
+    for line in lines[:10]:
+        line = line.strip()
+        if (
+            2 <= len(line.split()) <= 4 and
+            re.match(r"^[A-Z][a-z]+(\s+[A-Z][a-z]+)+$", line) and
+            not re.search(r"\d", line)
+        ):
+            return line.title()
+
+    # 📦 Fallback: Use cleaned filename as name
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-.]", " ", name)
-    name = re.sub(r"\b(Resume|CV|Developer|Engineer|Terrabit|Consulting|V\d+|ID\d+)\b", "", name, flags=re.I)
-    name = re.sub(r"\s+", " ", name)
-    name = name.strip().title()
-    if any(g in name.lower() for g in geo_words):
-        return "Name Not Found"
-    return name
+    name = re.sub(r"\b(Resume|CV|Developer|Engineer|V\d+|ID\d+)\b", "", name, flags=re.I)
+    name = re.sub(r"\s+", " ", name).strip().title()
+
+    if 2 <= len(name.split()) <= 4:
+        return name
+    return "Name Not Found"
 
 # Extract Email
 def extract_email(text):
