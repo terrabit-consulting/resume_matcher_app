@@ -51,8 +51,10 @@ def read_file(file):
 # Extract Name
 def extract_candidate_name(text, filename):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    geo_words = {"tamil nadu", "kerala", "delhi", "kuala lumpur", "malaysia", "bangalore",
-                 "hyderabad", "india", "chennai", "selangor", "maharashtra"}
+    geo_words = {
+        "tamil nadu", "kerala", "delhi", "kuala lumpur", "malaysia", "bangalore",
+        "hyderabad", "india", "chennai", "selangor", "maharashtra"
+    }
 
     for i, line in enumerate(lines):
         if re.search(r"(?i)^(candidate\s+)?name\s*[:\-]", line):
@@ -97,8 +99,9 @@ def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
 You are a Recruiter Assistant bot.
 
-Compare the following resume to the job description and return the result in this format:
+Compare the following resume to the job description and return the result in the following format:
 
+**Name**: {candidate_name}
 **Score**: [Match Score]%
 
 **Reason**:
@@ -160,6 +163,8 @@ if jd_file and not st.session_state.get("jd_text"):
 jd_text = st.session_state.get("jd_text", "")
 
 # Matching Logic
+summary = []  # ✅ Store correct names here too
+
 if st.button("Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state["processed_resumes"]:
@@ -184,6 +189,15 @@ if st.button("Run Matching") and jd_text and resume_files:
         })
         st.session_state["processed_resumes"].add(resume_file.name)
 
+        # ✅ Add the correct name directly to summary table
+        summary.append({
+            "Candidate Name": correct_name,
+            "Email": correct_email,
+            "Score": score
+        })
+
+    st.session_state["summary"] = summary  # ✅ Save summary for table
+
 # Display Results
 summary = []
 for entry in st.session_state["results"]:
@@ -201,7 +215,7 @@ for entry in st.session_state["results"]:
         st.success("Strong match – Good alignment with JD")
 
     summary.append({
-        "Candidate Name": entry["name"],
+        "Candidate": correct_name,
         "Email": entry["email"],
         "Score": score
     })
@@ -213,10 +227,11 @@ for entry in st.session_state["results"]:
             st.markdown(followup)
 
 # Summary Table
-if summary:
+
+if "summary" in st.session_state and st.session_state["summary"]:
     st.markdown("### Summary of All Candidates")
-    df_summary = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
-    st.dataframe(df_summary, use_container_width=True)
+    df_summary = pd.DataFrame(st.session_state["summary"]).sort_values(by="Score", ascending=False)
+    st.dataframe(df_summary)
 
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
