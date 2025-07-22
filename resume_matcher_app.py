@@ -13,10 +13,9 @@ def load_spacy_model():
     return spacy.load("en_core_web_sm")
 
 nlp = load_spacy_model()
-
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# --- GPT Call ---
+# --- GPT Fallback ---
 def call_gpt_with_fallback(prompt):
     try:
         response = client.chat.completions.create(
@@ -49,48 +48,57 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
-# --- Name & Email Extraction ---
+# --- Extract Candidate Name (Improved) ---
 def extract_candidate_name(text, filename):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+    geo_words = {
+        "tamilnadu", "tamil nadu", "kerala", "delhi", "kuala lumpur", "malaysia", "bangalore",
+        "hyderabad", "india", "chennai", "selangor", "maharashtra"
+    }
 
-    # Step 1: Label-based extraction
+    # Step 1: Label-based
     for i, line in enumerate(lines):
         if re.search(r"(?i)^(candidate\s+)?name\s*[:\-]", line):
             name = re.split(r"[:\-]", line, 1)[-1].strip()
-            if 2 <= len(name.split()) <= 4 and not re.search(r"(Engineer|Developer|Project|Manager|Summary)", name, re.IGNORECASE):
+            if 2 <= len(name.split()) <= 4 and not any(g in name.lower() for g in geo_words):
                 return name.title()
-
         if re.search(r"(?i)^candidate name$", line) and i + 1 < len(lines):
             next_line = lines[i + 1].strip()
-            if 2 <= len(next_line.split()) <= 4:
+            if 2 <= len(next_line.split()) <= 4 and not any(g in next_line.lower() for g in geo_words):
                 return next_line.title()
 
-    # Step 2: Clean top-line detection
+    # Step 2: Clean Top-line Detection
     for line in lines[:10]:
         if (2 <= len(line.split()) <= 4 and
             re.match(r"^[A-Z][a-z]+(\s+[A-Z][a-z]+)+$", line.strip()) and
-            not re.search(r"(Project|Engineer|Developer|Test|Resume|Manager|Curriculum)", line, re.IGNORECASE)):
+            not re.search(r"(Project|Engineer|Developer|Test|Resume|Manager|Curriculum|Tamil Nadu|Chennai|India)", line, re.IGNORECASE)):
             return line.strip().title()
 
     # Step 3: NLP fallback
     sample_text = "\n".join(lines[:15] + lines[-15:])
     doc = nlp(sample_text)
     for ent in doc.ents:
-        if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4:
-            return ent.text.strip().title()
+        if ent.label_ == "PERSON":
+            name = ent.text.strip().title()
+            if 2 <= len(name.split()) <= 4 and not any(g in name.lower() for g in geo_words):
+                return name
 
     # Step 4: Filename fallback
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-.]", " ", name)
     name = re.sub(r"\b(Resume|CV|Developer|Engineer|Terrabit|Consulting|V\d+|ID\d+)\b", "", name, flags=re.I)
     name = re.sub(r"\s+", " ", name)
-    return name.strip().title()
+    name = name.strip().title()
+    if any(g in name.lower() for g in geo_words):
+        return "Name Not Found"
+    return name
 
+# --- Extract Email ---
 def extract_email(text):
     match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
     return match.group() if match else "Not found"
 
-# --- JD vs Resume Comparator ---
+# --- JD-Resume Comparison ---
 def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
 You are a Recruiter Assistant bot.
@@ -115,6 +123,7 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
+# --- Follow-up Message Generation ---
 def generate_followup(jd_text, resume_text):
     prompt = f"""
 Based on the resume and job description below, generate:
@@ -133,9 +142,8 @@ Resume:
 # --- Streamlit UI ---
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("Resume Matcher Bot")
-st.write("Upload a JD and multiple resumes. Get match scores, name & email, and follow-up messaging.")
+st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
 
-# --- Session Initialization ---
 if "results" not in st.session_state:
     st.session_state["results"] = []
 if "processed_resumes" not in st.session_state:
@@ -145,12 +153,10 @@ if "jd_text" not in st.session_state:
 if "jd_file" not in st.session_state:
     st.session_state["jd_file"] = None
 
-# --- Reset Button ---
 if st.button("Start New Matching Session"):
     st.session_state.clear()
     st.rerun()
 
-# --- Uploaders ---
 jd_file = st.file_uploader("Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
 resume_files = st.file_uploader("Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
 
@@ -184,7 +190,7 @@ if st.button("Run Matching") and jd_text and resume_files:
         })
         st.session_state["processed_resumes"].add(resume_file.name)
 
-# --- Output Results ---
+# --- Display Results ---
 summary = []
 for entry in st.session_state["results"]:
     st.markdown("---")
