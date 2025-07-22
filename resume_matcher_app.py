@@ -6,9 +6,13 @@ import docx
 import pandas as pd
 import re
 import io
+import spacy
 from PyPDF2 import PdfReader
 
-# ✅ Secure OpenAI API Client
+# Load spaCy model once
+nlp = spacy.load("en_core_web_sm")
+
+# ✅ OpenAI Client
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # ✅ GPT Fallback Logic
@@ -55,44 +59,30 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
-# ✅ Enhanced Name Extractor
+# ✅ Enhanced Name Extraction
 def extract_candidate_name(resume_text, filename):
     lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
-    name_candidates = []
-    exclude_keywords = ["email", "e-mail", "tel", "mobile", "phone", "h/p", "contact", "@", "+", "objective", "summary", "curriculum", "vitae"]
+    candidate_lines = lines[:10] + lines[-10:]  # top & bottom of resume
 
-    for line in lines:
-        match = re.search(r"^\s*(full name|candidate name|name)\s*[:\-–]\s*(.+)$", line, re.IGNORECASE)
-        if match:
-            possible_name = match.group(2).strip()
-            if 2 <= len(possible_name.split()) <= 5:
-                return possible_name.title()
+    # Look for known name prefixes
+    name_patterns = [
+        r"(resume of[:\-]?)\s*(.+)", r"(cv of[:\-]?)\s*(.+)", r"(name[:\-]?)\s*(.+)", r"(full name[:\-]?)\s*(.+)"
+    ]
+    for line in candidate_lines:
+        for pattern in name_patterns:
+            match = re.search(pattern, line.lower(), re.IGNORECASE)
+            if match:
+                name = match.group(2).strip()
+                if 2 <= len(name.split()) <= 4 and all(w[0].isupper() for w in name.split() if w.isalpha()):
+                    return name.title()
 
-    for i, line in enumerate(lines):
-        if re.match(r"^(full name|candidate name|name)[:\-–]?$", line.strip(), re.IGNORECASE):
-            if i + 1 < len(lines):
-                next_line = lines[i + 1].strip()
-                if 2 <= len(next_line.split()) <= 5 and all(w[0].isupper() for w in next_line.split() if w.isalpha()):
-                    return next_line.title()
+    # Named Entity Recognition fallback
+    doc = nlp("\n".join(candidate_lines))
+    person_names = [ent.text.strip() for ent in doc.ents if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4]
+    if person_names:
+        return person_names[0].title()
 
-    for line in lines[:20]:
-        if any(k in line.lower() for k in exclude_keywords):
-            continue
-        words = line.strip().split()
-        if (
-            2 <= len(words) <= 5 and
-            all(w[0].isupper() for w in words if w.isalpha()) and
-            not any(term.lower() in line.lower() for term in [
-                "institute", "consultant", "engineer", "developer",
-                "solutions", "summary", "project", "objective"
-            ])
-        ):
-            name_candidates.append(line.strip())
-
-    if name_candidates:
-        return name_candidates[0].title()
-
-    # Fallback to filename
+    # Clean fallback from filename
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-.]", " ", name)
     name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID \d+|Backend|Developer|Engineer|SW|Resources|Center|Hubware|V\d+)\b", "", name, flags=re.I)
