@@ -1,3 +1,4 @@
+
 import openai
 import streamlit as st
 import time
@@ -13,7 +14,6 @@ def load_spacy_model():
     return spacy.load("en_core_web_sm")
 
 nlp = load_spacy_model()
-
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 def call_gpt_with_fallback(prompt):
@@ -60,41 +60,32 @@ def read_file(file):
 def extract_candidate_name(text, filename):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
 
-    # Check for "Candidate Name" followed by actual name
     for i, line in enumerate(lines):
         if re.search(r"Candidate Name\s*$", line, re.IGNORECASE) and i + 1 < len(lines):
             next_line = lines[i + 1].strip()
-            if 2 <= len(next_line.split()) <= 4 and not re.search(r"(Tester|Engineer|Developer|Manager)", next_line, re.IGNORECASE):
+            if 2 <= len(next_line.split()) <= 4:
                 return next_line.title()
 
-    # Check for "Name: Shanmugapriya S" style
     for line in lines:
         if re.search(r"(Candidate Name|Name)\s*[:\-]", line, re.IGNORECASE):
             name_part = re.split(r"[:\-]", line, 1)[-1].strip()
-            if 2 <= len(name_part.split()) <= 4 and not re.search(r"(Tester|Engineer|Developer|Manager)", name_part, re.IGNORECASE):
+            if 2 <= len(name_part.split()) <= 4:
                 return name_part.title()
 
-    # Use spaCy on intro/outro text
     sample_text = "\n".join(lines[:15] + lines[-15:])
     doc = nlp(sample_text)
     for ent in doc.ents:
-        if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4 and not re.search(r"(Tester|Engineer|Developer|Manager)", ent.text, re.IGNORECASE):
+        if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4:
             return ent.text.strip().title()
 
-    # Fallback: infer from filename
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-.]", " ", name)
-    name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID \d+|Backend|Developer|Engineer|SW|Resources|Center|Hubware|V\d+)\b", "", name, flags=re.I)
+    name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID\d+|Engineer|Tester|Developer|Consulting|Sr|Senior|Mr|Ms|DevOps)\b", "", name, flags=re.I)
     name = re.sub(r"\s+", " ", name)
-    cleaned_name = name.strip().title()
-
-    if re.search(r"(Tester|Engineer|Developer|Manager)", cleaned_name, re.IGNORECASE):
-        return "Not Found"
-
-    return cleaned_name
+    return name.strip().title() or "Not Found"
 
 def extract_email(text):
-    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", text)
+    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
     return match.group() if match else "Not found"
 
 def compare_resume(jd_text, resume_text, candidate_name):
@@ -136,7 +127,6 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# --- Streamlit UI ---
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("Resume Matcher Bot")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
@@ -174,7 +164,7 @@ if st.button("Run Matching") and jd_text and resume_files:
         with st.spinner(f"Analyzing {candidate_name}..."):
             result = compare_resume(jd_text, resume_text, candidate_name)
 
-        score_match = re.search(r"Score\*\*: \**([0-9]+)%", result)
+        score_match = re.search(r"Score\*\*: \*\*?([0-9]+)%", result)
         score = int(score_match.group(1)) if score_match else 0
 
         st.session_state["results"].append({
