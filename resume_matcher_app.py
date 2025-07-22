@@ -148,6 +148,8 @@ if "jd_text" not in st.session_state:
     st.session_state["jd_text"] = ""
 if "jd_file" not in st.session_state:
     st.session_state["jd_file"] = None
+if "summary" not in st.session_state:
+    st.session_state["summary"] = []
 
 if st.button("Start New Matching Session"):
     st.session_state.clear()
@@ -163,8 +165,6 @@ if jd_file and not st.session_state.get("jd_text"):
 jd_text = st.session_state.get("jd_text", "")
 
 # Matching Logic
-summary = []  # ✅ Store correct names here too
-
 if st.button("Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state["processed_resumes"]:
@@ -189,17 +189,13 @@ if st.button("Run Matching") and jd_text and resume_files:
         })
         st.session_state["processed_resumes"].add(resume_file.name)
 
-        # ✅ Add the correct name directly to summary table
-        summary.append({
+        st.session_state["summary"].append({
             "Candidate Name": correct_name,
             "Email": correct_email,
             "Score": score
         })
 
-    st.session_state["summary"] = summary  # ✅ Save summary for table
-
 # Display Results
-summary = []
 for entry in st.session_state["results"]:
     st.markdown("---")
     st.subheader(entry["name"])
@@ -214,12 +210,6 @@ for entry in st.session_state["results"]:
     else:
         st.success("Strong match – Good alignment with JD")
 
-    summary.append({
-        "Candidate": correct_name,
-        "Email": entry["email"],
-        "Score": score
-    })
-
     if st.button(f"Generate Follow-up for {entry['name']}", key=f"followup_{entry['name']}"):
         with st.spinner("Generating messages..."):
             followup = generate_followup(jd_text, entry["resume_text"])
@@ -227,8 +217,7 @@ for entry in st.session_state["results"]:
             st.markdown(followup)
 
 # Summary Table
-
-if "summary" in st.session_state and st.session_state["summary"]:
+if st.session_state["summary"]:
     st.markdown("### Summary of All Candidates")
     df_summary = pd.DataFrame(st.session_state["summary"]).sort_values(by="Score", ascending=False)
     st.dataframe(df_summary)
