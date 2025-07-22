@@ -1,3 +1,4 @@
+
 import openai
 import streamlit as st
 import time
@@ -12,10 +13,8 @@ from PyPDF2 import PdfReader
 # Load spaCy model
 nlp = spacy.load("en_core_web_sm")
 
-# ✅ OpenAI Client
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# ✅ GPT Fallback Logic
 def call_gpt_with_fallback(prompt):
     try:
         response = client.chat.completions.create(
@@ -38,7 +37,6 @@ def call_gpt_with_fallback(prompt):
             st.error(f"❌ GPT failed. {str(e2)}")
             return "⚠️ GPT processing failed."
 
-# ✅ File Readers
 def read_pdf(file):
     text = ""
     pdf_reader = PdfReader(file)
@@ -59,11 +57,9 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
-# ✅ Enhanced Name Extraction
 def extract_candidate_name(resume_text, filename):
     lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
     candidate_lines = lines[:10] + lines[-10:]
-
     name_patterns = [
         r"(resume of[:\-]?)\s*(.+)", r"(cv of[:\-]?)\s*(.+)", r"(name[:\-]?)\s*(.+)", r"(full name[:\-]?)\s*(.+)"
     ]
@@ -86,10 +82,8 @@ def extract_candidate_name(resume_text, filename):
     name = re.sub(r"\s+", " ", name)
     return name.strip().title()
 
-# ✅ Resume Comparison with GPT
 def compare_resume(jd_text, resume_text, candidate_name):
-    prompt = f"""
-You are a Recruiter Assistant bot.
+    prompt = f"""You are a Recruiter Assistant bot.
 
 Compare the following resume to the job description and return the result in the following format:
 
@@ -107,14 +101,11 @@ Job Description:
 {jd_text}
 
 Resume:
-{resume_text}
-"""
+{resume_text}"""
     return call_gpt_with_fallback(prompt)
 
-# ✅ Follow-up Message Generator
 def generate_followup(jd_text, resume_text):
-    prompt = f"""
-Based on the resume and job description below, generate:
+    prompt = f"""Based on the resume and job description below, generate:
 1. 📱 WhatsApp message (casual)
 2. 📧 Email message (formal)
 3. 🧠 Screening questions (3-5)
@@ -123,16 +114,13 @@ Job Description:
 {jd_text}
 
 Resume:
-{resume_text}
-"""
+{resume_text}"""
     return call_gpt_with_fallback(prompt)
 
-# ✅ Streamlit UI
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("🤖 Resume Matcher Bot (GPT-4o → 3.5 fallback)")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
 
-# Session State
 if "results" not in st.session_state:
     st.session_state["results"] = []
 if "processed_resumes" not in st.session_state:
@@ -142,12 +130,10 @@ if "jd_text" not in st.session_state:
 if "jd_file" not in st.session_state:
     st.session_state["jd_file"] = None
 
-# Reset Button
 if st.button("🔄 Start New Matching Session"):
     st.session_state.clear()
     st.rerun()
 
-# Upload JD and Resumes
 jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
 resume_files = st.file_uploader("📄 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
 
@@ -157,7 +143,6 @@ if jd_file and not st.session_state.get("jd_text"):
 
 jd_text = st.session_state.get("jd_text", "")
 
-# Run Matching
 if st.button("▶️ Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state["processed_resumes"]:
@@ -179,7 +164,6 @@ if st.button("▶️ Run Matching") and jd_text and resume_files:
         })
         st.session_state["processed_resumes"].add(resume_file.name)
 
-# ✅ Results Display
 summary = []
 for entry in st.session_state["results"]:
     st.markdown("---")
@@ -202,7 +186,6 @@ for entry in st.session_state["results"]:
             st.markdown("---")
             st.markdown(followup)
 
-# ✅ Summary Table + Excel Export
 if summary:
     st.markdown("### 📊 Summary of All Candidates")
     df_summary = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
