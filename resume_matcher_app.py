@@ -34,9 +34,32 @@ def read_pdf(file):
             text += page.get_text()
     return text
 
+
 def read_docx(file):
     doc = docx.Document(file)
-    return "\n".join([para.text for para in doc.paragraphs])
+    full_text = []
+
+    # Extract normal paragraphs
+    for para in doc.paragraphs:
+        full_text.append(para.text)
+
+    # Extract text from tables
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                full_text.append(cell.text)
+
+    # Extract footer text (if any)
+    try:
+        section = doc.sections[0]
+        for para in section.footer.paragraphs:
+            full_text.append(para.text)
+    except Exception:
+        pass  # Some docx may not allow access to footer
+
+    return "
+".join(full_text)
+
 
 def read_file(file):
     if file.type == "application/pdf":
