@@ -113,48 +113,27 @@ Extract the candidate's **full name only** from the following resume text.
 If no valid name is found, respond only with: Name Not Found
 
 Resume:
-"""
+\"\"\"
 {trimmed_text}
-"""
+\"\"\"
 
 Return only the name.
 """
         name = call_gpt_with_fallback(prompt)
         suspicious_keywords = ["java", "python", "developer", "resume", "engineer"]
-        if (not name or
-            len(name.split()) > 5 or
-            any(word in name.lower() for word in suspicious_keywords) or
-            "@" in name or
-            name.lower().startswith("name not found")):
+        if (
+            not name
+            or len(name.split()) > 5
+            or any(word in name.lower() for word in suspicious_keywords)
+            or "@" in name
+            or name.lower().startswith("name not found")
+        ):
             return extract_candidate_name(text, filename)
         return name.strip().title()
+
     except Exception:
         return extract_candidate_name(text, filename)
-
-def compare_resume(jd_text, resume_text, candidate_name):
-    prompt = f"""
-You are a Recruiter Assistant bot.
-
-Compare the following resume to the job description and return the result in the following format:
-
-**Name**: {candidate_name}
-**Score**: [Match Score]%
-
-**Reason**:
-- Role Match: (Brief explanation)
-- Skill Match: (Matched or missing skills)
-- Major Gaps: (What is completely missing or irrelevant)
-
-Warning: Add only if score < 70%
-
-Job Description:
-{jd_text}
-
-Resume:
-{resume_text}
-"""
-    return call_gpt_with_fallback(prompt)
-
+        
 def generate_followup(jd_text, resume_text):
     prompt = f"""
 Based on the resume and job description below, generate:
