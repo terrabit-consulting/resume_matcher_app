@@ -13,7 +13,6 @@ def load_spacy_model():
     return spacy.load("en_core_web_sm")
 
 nlp = load_spacy_model()
-# from PyPDF2 import PdfReader
 
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
@@ -41,10 +40,9 @@ def call_gpt_with_fallback(prompt):
 
 def read_pdf(file):
     text = ""
-    pdf_reader = PdfReader(file)
-    for page in pdf_reader.pages:
-        if page.extract_text():
-            text += page.extract_text()
+    with fitz.open(stream=file.read(), filetype="pdf") as doc:
+        for page in doc:
+            text += page.get_text()
     return text
 
 def read_docx(file):
@@ -59,32 +57,30 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
-def extract_candidate_name(resume_text, filename):
-    lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
-    candidate_lines = lines[:15] + lines[-15:]
+def extract_candidate_name(text, filename):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    sample_text = "\n".join(lines[:15] + lines[-15:])
 
-    for line in candidate_lines:
+    for line in lines:
         if re.search(r"(Candidate Name|Name)\s*[:\-]", line, re.IGNORECASE):
             name_part = re.split(r"[:\-]", line, 1)[-1].strip()
             if 2 <= len(name_part.split()) <= 4 and not re.search(r"(Tamil Nadu|India|Chennai|Kuala Lumpur)", name_part, re.IGNORECASE):
                 return name_part.title()
 
-    doc = nlp("\n".join(candidate_lines))
-    person_names = [
-        ent.text.strip()
-        for ent in doc.ents
-        if ent.label_ == "PERSON"
-        and 2 <= len(ent.text.split()) <= 4
-        and not re.search(r"(Tamil Nadu|India|Chennai|Kuala Lumpur)", ent.text, re.IGNORECASE)
-    ]
-    if person_names:
-        return person_names[0].title()
+    doc = nlp(sample_text)
+    for ent in doc.ents:
+        if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4 and not re.search(r"(Tamil Nadu|India|Chennai|Kuala Lumpur)", ent.text, re.IGNORECASE):
+            return ent.text.strip().title()
 
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-.]", " ", name)
     name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID \d+|Backend|Developer|Engineer|SW|Resources|Center|Hubware|V\d+)\b", "", name, flags=re.I)
     name = re.sub(r"\s+", " ", name)
     return name.strip().title()
+
+def extract_email(text):
+    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", text)
+    return match.group() if match else "Not found"
 
 def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
@@ -125,6 +121,7 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
+# --- Streamlit UI ---
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("Resume Matcher Bot")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
@@ -157,6 +154,7 @@ if st.button("Run Matching") and jd_text and resume_files:
             continue
         resume_text = read_file(resume_file)
         candidate_name = extract_candidate_name(resume_text, resume_file.name)
+        candidate_email = extract_email(resume_text)
 
         with st.spinner(f"Analyzing {candidate_name}..."):
             result = compare_resume(jd_text, resume_text, candidate_name)
@@ -166,6 +164,7 @@ if st.button("Run Matching") and jd_text and resume_files:
 
         st.session_state["results"].append({
             "name": candidate_name,
+            "email": candidate_email,
             "score": score,
             "result": result,
             "resume_text": resume_text
@@ -176,6 +175,7 @@ summary = []
 for entry in st.session_state["results"]:
     st.markdown("---")
     st.subheader(f"Candidate: {entry['name']}")
+    st.markdown(f"**Email**: {entry['email']}")
     st.markdown(entry["result"])
 
     score = entry["score"]
@@ -186,7 +186,7 @@ for entry in st.session_state["results"]:
     else:
         st.success("Strong match – Good alignment with JD")
 
-    summary.append({"Candidate": entry["name"], "Score": score})
+    summary.append({"Candidate": entry["name"], "Email": entry["email"], "Score": score})
 
     if st.button(f"Generate Follow-up for {entry['name']}", key=f"followup_{entry['name']}"):
         with st.spinner("Generating messages..."):
