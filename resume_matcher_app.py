@@ -9,7 +9,7 @@ import io
 import spacy
 from PyPDF2 import PdfReader
 
-# Load spaCy model once
+# Load spaCy model
 nlp = spacy.load("en_core_web_sm")
 
 # ✅ OpenAI Client
@@ -62,9 +62,8 @@ def read_file(file):
 # ✅ Enhanced Name Extraction
 def extract_candidate_name(resume_text, filename):
     lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
-    candidate_lines = lines[:10] + lines[-10:]  # top & bottom of resume
+    candidate_lines = lines[:10] + lines[-10:]
 
-    # Look for known name prefixes
     name_patterns = [
         r"(resume of[:\-]?)\s*(.+)", r"(cv of[:\-]?)\s*(.+)", r"(name[:\-]?)\s*(.+)", r"(full name[:\-]?)\s*(.+)"
     ]
@@ -76,13 +75,11 @@ def extract_candidate_name(resume_text, filename):
                 if 2 <= len(name.split()) <= 4 and all(w[0].isupper() for w in name.split() if w.isalpha()):
                     return name.title()
 
-    # Named Entity Recognition fallback
     doc = nlp("\n".join(candidate_lines))
     person_names = [ent.text.strip() for ent in doc.ents if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4]
     if person_names:
         return person_names[0].title()
 
-    # Clean fallback from filename
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-.]", " ", name)
     name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID \d+|Backend|Developer|Engineer|SW|Resources|Center|Hubware|V\d+)\b", "", name, flags=re.I)
@@ -147,11 +144,7 @@ if "jd_file" not in st.session_state:
 
 # Reset Button
 if st.button("🔄 Start New Matching Session"):
-    st.session_state.pop("results", None)
-    st.session_state.pop("processed_resumes", None)
-    st.session_state.pop("jd_text", None)
-    st.session_state.pop("jd_file", None)
-    st.session_state["reset_key"] = int(time.time())
+    st.session_state.clear()
     st.rerun()
 
 # Upload JD and Resumes
