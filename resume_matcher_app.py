@@ -181,7 +181,7 @@ if st.button("Run Matching") and jd_text and resume_files:
         score = int(score_match.group(1)) if score_match else 0
 
         st.session_state["results"].append({
-            "name": correct_name,
+            "correct_name": correct_name,
             "email": correct_email,
             "score": score,
             "result": result,
@@ -198,7 +198,7 @@ if st.button("Run Matching") and jd_text and resume_files:
 # Display Results
 for entry in st.session_state["results"]:
     st.markdown("---")
-    st.subheader(entry["name"])
+    st.subheader(entry["correct_name"])
     st.markdown(f"**Email**: {entry['email']}")
     st.markdown(entry["result"])
 
