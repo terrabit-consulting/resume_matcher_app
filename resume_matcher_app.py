@@ -34,7 +34,6 @@ def read_pdf(file):
             text += page.get_text()
     return text
 
-
 def read_docx(file):
     doc = docx.Document(file)
     full_text = []
@@ -57,9 +56,7 @@ def read_docx(file):
     except Exception:
         pass  # Some docx may not allow access to footer
 
-    return "
-".join(full_text)
-
+    return "\n".join(full_text)
 
 def read_file(file):
     if file.type == "application/pdf":
