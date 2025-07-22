@@ -1,36 +1,22 @@
-import streamlit as st
+
 import openai
+import streamlit as st
+import time
 import fitz  # PyMuPDF
 import docx
 import pandas as pd
 import re
 import io
 import spacy
-import subprocess
-import time
-from PyPDF2 import PdfReader
-
-st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
-st.title("🤖 Resume Matcher Bot")
-st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messages.")
-
-try:
-    client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-   # st.success("✅ OpenAI client initialized")
-except Exception as e:
-    st.error(f"❌ OpenAI init failed: {e}")
 
 @st.cache_resource
 def load_spacy_model():
-    try:
-        return spacy.load("en_core_web_sm")
-    except OSError:
-        st.warning("⚠️ spaCy model not found. Downloading...")
-        subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
-        return spacy.load("en_core_web_sm")
+    return spacy.load("en_core_web_sm")
 
 nlp = load_spacy_model()
-# st.success("✅ spaCy model loaded")
+from PyPDF2 import PdfReader
+
+client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 def call_gpt_with_fallback(prompt):
     try:
@@ -41,7 +27,7 @@ def call_gpt_with_fallback(prompt):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        st.warning(f"⚠️ GPT-4o failed: {str(e)}. Trying GPT-3.5...")
+        st.warning(f"⚠️ GPT-4o failed: {str(e)}. Falling back to GPT-3.5...")
         time.sleep(1)
         try:
             response = client.chat.completions.create(
@@ -76,20 +62,22 @@ def read_file(file):
 
 def extract_candidate_name(resume_text, filename):
     lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
-    candidate_lines = lines[:10] + lines[-10:]
-    name_patterns = [
-        r"(resume of[:\-]?)\s*(.+)", r"(cv of[:\-]?)\s*(.+)", r"(name[:\-]?)\s*(.+)", r"(full name[:\-]?)\s*(.+)"
-    ]
+    candidate_lines = lines[:15] + lines[-15:]
+
     for line in candidate_lines:
-        for pattern in name_patterns:
-            match = re.search(pattern, line.lower(), re.IGNORECASE)
-            if match:
-                name = match.group(2).strip()
-                if 2 <= len(name.split()) <= 4 and all(w[0].isupper() for w in name.split() if w.isalpha()):
-                    return name.title()
+        if re.search(r"(Candidate Name|Name)\s*[:\-]", line, re.IGNORECASE):
+            name_part = re.split(r"[:\-]", line, 1)[-1].strip()
+            if 2 <= len(name_part.split()) <= 4 and not re.search(r"(Tamil Nadu|India|Chennai|Kuala Lumpur)", name_part, re.IGNORECASE):
+                return name_part.title()
 
     doc = nlp("\n".join(candidate_lines))
-    person_names = [ent.text.strip() for ent in doc.ents if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4]
+    person_names = [
+        ent.text.strip()
+        for ent in doc.ents
+        if ent.label_ == "PERSON"
+        and 2 <= len(ent.text.split()) <= 4
+        and not re.search(r"(Tamil Nadu|India|Chennai|Kuala Lumpur)", ent.text, re.IGNORECASE)
+    ]
     if person_names:
         return person_names[0].title()
 
@@ -138,6 +126,10 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
+st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
+st.title("Resume Matcher Bot")
+st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
+
 if "results" not in st.session_state:
     st.session_state["results"] = []
 if "processed_resumes" not in st.session_state:
@@ -151,8 +143,8 @@ if st.button("Start New Matching Session"):
     st.session_state.clear()
     st.rerun()
 
-jd_file = st.file_uploader("📌 Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
-resume_files = st.file_uploader("📄 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
+jd_file = st.file_uploader("Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
+resume_files = st.file_uploader("Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
 
 if jd_file and not st.session_state.get("jd_text"):
     st.session_state["jd_text"] = read_file(jd_file)
@@ -204,7 +196,7 @@ for entry in st.session_state["results"]:
             st.markdown(followup)
 
 if summary:
-    st.markdown("### 📊 Summary of All Candidates")
+    st.markdown("### Summary of All Candidates")
     df_summary = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
     st.dataframe(df_summary)
 
@@ -213,7 +205,7 @@ if summary:
         df_summary.to_excel(writer, index=False)
 
     st.download_button(
-        label="📥 Download Summary as Excel",
+        label="Download Summary as Excel",
         data=excel_buffer.getvalue(),
         file_name="resume_match_summary.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
