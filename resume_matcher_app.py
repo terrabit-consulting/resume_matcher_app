@@ -59,24 +59,39 @@ def read_file(file):
 
 def extract_candidate_name(text, filename):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    sample_text = "\n".join(lines[:15] + lines[-15:])
 
+    # Check for "Candidate Name" followed by actual name
+    for i, line in enumerate(lines):
+        if re.search(r"Candidate Name\s*$", line, re.IGNORECASE) and i + 1 < len(lines):
+            next_line = lines[i + 1].strip()
+            if 2 <= len(next_line.split()) <= 4 and not re.search(r"(Tester|Engineer|Developer|Manager)", next_line, re.IGNORECASE):
+                return next_line.title()
+
+    # Check for "Name: Shanmugapriya S" style
     for line in lines:
         if re.search(r"(Candidate Name|Name)\s*[:\-]", line, re.IGNORECASE):
             name_part = re.split(r"[:\-]", line, 1)[-1].strip()
-            if 2 <= len(name_part.split()) <= 4 and not re.search(r"(Tamil Nadu|India|Chennai|Kuala Lumpur)", name_part, re.IGNORECASE):
+            if 2 <= len(name_part.split()) <= 4 and not re.search(r"(Tester|Engineer|Developer|Manager)", name_part, re.IGNORECASE):
                 return name_part.title()
 
+    # Use spaCy on intro/outro text
+    sample_text = "\n".join(lines[:15] + lines[-15:])
     doc = nlp(sample_text)
     for ent in doc.ents:
-        if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4 and not re.search(r"(Tamil Nadu|India|Chennai|Kuala Lumpur)", ent.text, re.IGNORECASE):
+        if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4 and not re.search(r"(Tester|Engineer|Developer|Manager)", ent.text, re.IGNORECASE):
             return ent.text.strip().title()
 
+    # Fallback: infer from filename
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-.]", " ", name)
     name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID \d+|Backend|Developer|Engineer|SW|Resources|Center|Hubware|V\d+)\b", "", name, flags=re.I)
     name = re.sub(r"\s+", " ", name)
-    return name.strip().title()
+    cleaned_name = name.strip().title()
+
+    if re.search(r"(Tester|Engineer|Developer|Manager)", cleaned_name, re.IGNORECASE):
+        return "Not Found"
+
+    return cleaned_name
 
 def extract_email(text):
     match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", text)
