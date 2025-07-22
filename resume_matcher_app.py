@@ -51,10 +51,8 @@ def read_file(file):
 # Extract Name
 def extract_candidate_name(text, filename):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    geo_words = {
-        "tamil nadu", "kerala", "delhi", "kuala lumpur", "malaysia", "bangalore",
-        "hyderabad", "india", "chennai", "selangor", "maharashtra"
-    }
+    geo_words = {"tamil nadu", "kerala", "delhi", "kuala lumpur", "malaysia", "bangalore",
+                 "hyderabad", "india", "chennai", "selangor", "maharashtra"}
 
     for i, line in enumerate(lines):
         if re.search(r"(?i)^(candidate\s+)?name\s*[:\-]", line):
@@ -99,9 +97,8 @@ def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
 You are a Recruiter Assistant bot.
 
-Compare the following resume to the job description and return the result in the following format:
+Compare the following resume to the job description and return the result in this format:
 
-**Name**: {candidate_name}
 **Score**: [Match Score]%
 
 **Reason**:
@@ -204,7 +201,7 @@ for entry in st.session_state["results"]:
         st.success("Strong match – Good alignment with JD")
 
     summary.append({
-        "Candidate": entry["name"],
+        "Candidate Name": entry["name"],
         "Email": entry["email"],
         "Score": score
     })
@@ -219,7 +216,7 @@ for entry in st.session_state["results"]:
 if summary:
     st.markdown("### Summary of All Candidates")
     df_summary = pd.DataFrame(summary).sort_values(by="Score", ascending=False)
-    st.dataframe(df_summary)
+    st.dataframe(df_summary, use_container_width=True)
 
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
