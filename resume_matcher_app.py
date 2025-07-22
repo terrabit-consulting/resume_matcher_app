@@ -1,3 +1,4 @@
+
 import openai
 import streamlit as st
 import time
@@ -15,7 +16,6 @@ def load_spacy_model():
 nlp = load_spacy_model()
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# GPT Fallback
 def call_gpt_with_fallback(prompt):
     try:
         response = client.chat.completions.create(
@@ -28,7 +28,6 @@ def call_gpt_with_fallback(prompt):
         st.error(f"❌ GPT-4o failed. {str(e)}")
         return "⚠️ GPT processing failed."
 
-# File Readers
 def read_pdf(file):
     text = ""
     with fitz.open(stream=file.read(), filetype="pdf") as doc:
@@ -48,12 +47,10 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
-# Email Extractor
 def extract_email(text):
     match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
     return match.group() if match else "Not found"
 
-# Rule-Based Fallback Name Extractor
 def extract_candidate_name(text, filename):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     geo_words = {
@@ -94,30 +91,47 @@ def extract_candidate_name(text, filename):
         return "Name Not Found"
     return name
 
-# ✅ Improved GPT-Based Name Extractor
 def improved_extract_candidate_name(text, filename):
     try:
         trimmed_text = "\n".join(text.splitlines()[:50])
         prompt = f"""
-You are an expert resume parser. Extract the candidate's **full name only** from the following resume text. 
-Ignore job titles, project names, and locations.
+You are a resume parser assistant.
 
-If you cannot find the name, respond only with: Name Not Found
+Extract the candidate's **full name only** from the following resume text.
+
+✅ Look for patterns like:
+- Candidate Name:
+- Name:
+- Resume of <Name>
+- A standalone name at the top (2–4 words, capitalized)
+
+❌ Do NOT return:
+- Job roles (e.g., Developer, Manager)
+- Locations (e.g., India, Malaysia)
+- Technologies or skills (e.g., Java, Python, Selenium)
+- Email addresses or phone numbers
+
+If no valid name is found, respond only with: Name Not Found
 
 Resume:
-\"\"\"
+"""
 {trimmed_text}
-\"\"\"
+"""
+
 Return only the name.
 """
         name = call_gpt_with_fallback(prompt)
-        if not name or len(name.split()) > 5 or "@" in name or name.lower().startswith("name not found"):
+        suspicious_keywords = ["java", "python", "developer", "resume", "engineer"]
+        if (not name or
+            len(name.split()) > 5 or
+            any(word in name.lower() for word in suspicious_keywords) or
+            "@" in name or
+            name.lower().startswith("name not found")):
             return extract_candidate_name(text, filename)
         return name.strip().title()
     except Exception:
         return extract_candidate_name(text, filename)
 
-# JD vs Resume Comparator
 def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
 You are a Recruiter Assistant bot.
@@ -142,7 +156,6 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# Follow-up Generator
 def generate_followup(jd_text, resume_text):
     prompt = f"""
 Based on the resume and job description below, generate:
@@ -158,7 +171,6 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# Streamlit UI
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("Resume Matcher Bot")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
@@ -187,7 +199,6 @@ if jd_file and not st.session_state.get("jd_text"):
 
 jd_text = st.session_state.get("jd_text", "")
 
-# Matching Logic
 if st.button("Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state["processed_resumes"]:
@@ -218,7 +229,6 @@ if st.button("Run Matching") and jd_text and resume_files:
             "Score": score
         })
 
-# Display Results
 for entry in st.session_state["results"]:
     st.markdown("---")
     st.subheader(entry["correct_name"])
@@ -239,7 +249,6 @@ for entry in st.session_state["results"]:
             st.markdown("---")
             st.markdown(followup)
 
-# Summary Table
 if st.session_state["summary"]:
     st.markdown("### Summary of All Candidates")
     df_summary = pd.DataFrame(st.session_state["summary"]).sort_values(by="Score", ascending=False)
