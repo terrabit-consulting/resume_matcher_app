@@ -48,7 +48,12 @@ def read_file(file):
     else:
         return file.read().decode("utf-8", errors="ignore")
 
-# Extract Name
+# Email Extractor
+def extract_email(text):
+    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
+    return match.group() if match else "Not found"
+
+# Rule-Based Fallback Name Extractor
 def extract_candidate_name(text, filename):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     geo_words = {
@@ -89,12 +94,30 @@ def extract_candidate_name(text, filename):
         return "Name Not Found"
     return name
 
-# Extract Email
-def extract_email(text):
-    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
-    return match.group() if match else "Not found"
+# ✅ Improved GPT-Based Name Extractor
+def improved_extract_candidate_name(text, filename):
+    try:
+        trimmed_text = "\n".join(text.splitlines()[:50])
+        prompt = f"""
+You are an expert resume parser. Extract the candidate's **full name only** from the following resume text. 
+Ignore job titles, project names, and locations.
 
-# JD-Resume Comparator
+If you cannot find the name, respond only with: Name Not Found
+
+Resume:
+\"\"\"
+{trimmed_text}
+\"\"\"
+Return only the name.
+"""
+        name = call_gpt_with_fallback(prompt)
+        if not name or len(name.split()) > 5 or "@" in name or name.lower().startswith("name not found"):
+            return extract_candidate_name(text, filename)
+        return name.strip().title()
+    except Exception:
+        return extract_candidate_name(text, filename)
+
+# JD vs Resume Comparator
 def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
 You are a Recruiter Assistant bot.
@@ -171,7 +194,7 @@ if st.button("Run Matching") and jd_text and resume_files:
             continue
 
         resume_text = read_file(resume_file)
-        correct_name = extract_candidate_name(resume_text, resume_file.name)
+        correct_name = improved_extract_candidate_name(resume_text, resume_file.name)
         correct_email = extract_email(resume_text)
 
         with st.spinner(f"Analyzing {correct_name}..."):
@@ -211,7 +234,6 @@ for entry in st.session_state["results"]:
         st.success("Strong match – Good alignment with JD")
 
     if st.button(f"Generate Follow-up for {entry['correct_name']}", key=f"followup_{entry['correct_name']}"):
-   # if st.button(f"Generate Follow-up for {entry['name']}", key=f"followup_{entry['name']}"):
         with st.spinner("Generating messages..."):
             followup = generate_followup(jd_text, entry["resume_text"])
             st.markdown("---")
