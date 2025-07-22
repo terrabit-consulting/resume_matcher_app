@@ -52,15 +52,19 @@ def read_file(file):
 # --- Name and Email Extractors ---
 def extract_candidate_name(text, filename):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+    geo_words = {
+        "tamil nadu", "kerala", "delhi", "kuala lumpur", "malaysia", "bangalore",
+        "hyderabad", "india", "chennai", "selangor", "maharashtra"
+    }
 
     for i, line in enumerate(lines):
-        if re.search(r"Candidate Name\\s*$", line, re.IGNORECASE) and i + 1 < len(lines):
+        if re.search(r"(?i)^candidate name$", line) and i + 1 < len(lines):
             next_line = lines[i + 1].strip()
-            if 2 <= len(next_line.split()) <= 4:
+            if 2 <= len(next_line.split()) <= 4 and not any(g in next_line.lower() for g in geo_words):
                 return next_line.title()
 
     for line in lines:
-        if re.search(r"(Candidate Name|Name)\\s*[:\-]", line, re.IGNORECASE):
+        if re.search(r"(?i)(Candidate Name|Name)\s*[:\-]", line):
             name_part = re.split(r"[:\-]", line, 1)[-1].strip()
             if 2 <= len(name_part.split()) <= 4 and not re.search(r"(Tester|Engineer|Developer|Manager|Resume|CV)", name_part, re.IGNORECASE):
                 return name_part.title()
@@ -68,14 +72,17 @@ def extract_candidate_name(text, filename):
     sample_text = "\n".join(lines[:15] + lines[-15:])
     doc = nlp(sample_text)
     for ent in doc.ents:
-        if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4:
+        if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4 and not any(g in ent.text.lower() for g in geo_words):
             return ent.text.strip().title()
 
     name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
     name = re.sub(r"[_\-.]", " ", name)
     name = re.sub(r"\b(Resume|CV|Terrabit Consulting|ID \d+|Developer|Engineer|V\d+)\b", "", name, flags=re.I)
     name = re.sub(r"\s+", " ", name)
-    return name.strip().title()
+    name = name.strip().title()
+    if any(g in name.lower() for g in geo_words):
+        return "Name Not Found"
+    return name
 
 def extract_email(text):
     match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", text)
@@ -159,7 +166,7 @@ if st.button("Run Matching") and jd_text and resume_files:
         with st.spinner(f"Analyzing {correct_name}..."):
             result = compare_resume(jd_text, resume_text, correct_name)
 
-        score_match = re.search(r"Score\*\*: \**([0-9]+)%", result)
+        score_match = re.search(r"Score\*\*:\s*([0-9]+)%", result)
         score = int(score_match.group(1)) if score_match else 0
 
         st.session_state["results"].append({
