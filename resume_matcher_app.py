@@ -38,23 +38,20 @@ def read_docx(file):
     doc = docx.Document(file)
     full_text = []
 
-    # Extract normal paragraphs
     for para in doc.paragraphs:
         full_text.append(para.text)
 
-    # Extract text from tables
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 full_text.append(cell.text)
 
-    # Extract footer text (if any)
     try:
         section = doc.sections[0]
         for para in section.footer.paragraphs:
             full_text.append(para.text)
     except Exception:
-        pass  # Some docx may not allow access to footer
+        pass
 
     return "\n".join(full_text)
 
@@ -70,45 +67,19 @@ def extract_email(text):
     match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
     return match.group() if match else "Not found"
 
-def extract_candidate_name(text, filename):
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    geo_words = {
-        "tamil nadu", "kerala", "delhi", "kuala lumpur", "malaysia", "bangalore",
-        "hyderabad", "india", "chennai", "selangor", "maharashtra"
-    }
+def extract_candidate_name_from_table(text):
+    matches = re.findall(r"(?i)Candidate Name\s*[\t:–-]*\s*(.+)", text)
+    for match in matches:
+        name = match.strip().title()
+        if 2 <= len(name.split()) <= 4:
+            return name
+    return None
 
-    for i, line in enumerate(lines):
-        if re.search(r"(?i)^(candidate\s+)?name\s*[:\-]", line):
-            name = re.split(r"[:\-]", line, 1)[-1].strip()
-            if 2 <= len(name.split()) <= 4 and not any(g in name.lower() for g in geo_words):
-                return name.title()
-        if re.search(r"(?i)^candidate name$", line) and i + 1 < len(lines):
-            next_line = lines[i + 1].strip()
-            if 2 <= len(next_line.split()) <= 4 and not any(g in next_line.lower() for g in geo_words):
-                return next_line.title()
-
-    for line in lines[:10]:
-        if (2 <= len(line.split()) <= 4 and
-            re.match(r"^[A-Z][a-z]+(\s+[A-Z][a-z]+)+$", line.strip()) and
-            not re.search(r"(Project|Engineer|Developer|Test|Resume|Manager|Curriculum|Tamil Nadu|Chennai|India)", line, re.IGNORECASE)):
-            return line.strip().title()
-
-    sample_text = "\n".join(lines[:15] + lines[-15:])
-    doc = nlp(sample_text)
-    for ent in doc.ents:
-        if ent.label_ == "PERSON":
-            name = ent.text.strip().title()
-            if 2 <= len(name.split()) <= 4 and not any(g in name.lower() for g in geo_words):
-                return name
-
-    name = filename.replace(".docx", "").replace(".pdf", "").replace(".txt", "")
-    name = re.sub(r"[_\-.]", " ", name)
-    name = re.sub(r"\b(Resume|CV|Developer|Engineer|Terrabit|Consulting|V\d+|ID\d+)\b", "", name, flags=re.I)
-    name = re.sub(r"\s+", " ", name)
-    name = name.strip().title()
-    if any(g in name.lower() for g in geo_words):
-        return "Name Not Found"
-    return name
+def extract_candidate_name_from_footer(text):
+    footer_match = re.search(r"(?i)Resume of\s+([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", text)
+    if footer_match:
+        return footer_match.group(1).strip().title()
+    return None
 
 def improved_extract_candidate_name(text, filename):
     try:
@@ -120,34 +91,47 @@ Extract the candidate's **full name only** from the following resume text.
 
 ✅ Look for patterns like:
 - Candidate Name:
-- Name:
 - Resume of <Name>
+- Table headers or footers
 - A standalone name at the top (2–4 words, capitalized)
 
 ❌ Do NOT return:
-- Job roles (e.g., Developer, Manager)
-- Locations (e.g., India, Malaysia)
-- Technologies or skills (e.g., Java, Python, Selenium)
+- Job titles (e.g., Developer, Manager)
+- Technical terms (e.g., DB Servers, Azure, Python)
+- Locations (e.g., Bangalore, India)
 - Email addresses or phone numbers
 
 If no valid name is found, respond only with: Name Not Found
 
 Resume:
-""" + trimmed_text + """
+{trimmed_text}
 
 Return only the name.
 """
         name = call_gpt_with_fallback(prompt)
-        suspicious_keywords = ["java", "python", "developer", "resume", "engineer"]
-        if (not name or
+        suspicious_keywords = ["java", "python", "developer", "resume", "engineer", "servers"]
+        if (
+            not name or
             len(name.split()) > 5 or
             any(word in name.lower() for word in suspicious_keywords) or
             "@" in name or
-            name.lower().startswith("name not found")):
-            return extract_candidate_name(text, filename)
+            name.lower().startswith("name not found")
+        ):
+            return "Name Not Found"
         return name.strip().title()
     except Exception:
-        return extract_candidate_name(text, filename)
+        return "Name Not Found"
+
+def extract_candidate_name(text, filename):
+    table_name = extract_candidate_name_from_table(text)
+    if table_name:
+        return table_name
+
+    footer_name = extract_candidate_name_from_footer(text)
+    if footer_name:
+        return footer_name
+
+    return improved_extract_candidate_name(text, filename)
 
 def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
@@ -188,9 +172,9 @@ Resume:
 """
     return call_gpt_with_fallback(prompt)
 
-# ------------------- Streamlit UI -------------------
+# Streamlit UI
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
-st.title("Terrabit Consulting Talent Match System")
+st.title("📌 Terrabit Consulting Talent Match System")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
 
 if "results" not in st.session_state:
@@ -204,12 +188,12 @@ if "jd_file" not in st.session_state:
 if "summary" not in st.session_state:
     st.session_state["summary"] = []
 
-if st.button("Start New Matching Session"):
+if st.button("🔁 Start New Matching Session"):
     st.session_state.clear()
     st.rerun()
 
-jd_file = st.file_uploader("Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
-resume_files = st.file_uploader("Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
+jd_file = st.file_uploader("📄 Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
+resume_files = st.file_uploader("📑 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
 
 if jd_file and not st.session_state.get("jd_text"):
     st.session_state["jd_text"] = read_file(jd_file)
@@ -217,19 +201,19 @@ if jd_file and not st.session_state.get("jd_text"):
 
 jd_text = st.session_state.get("jd_text", "")
 
-if st.button("Run Matching") and jd_text and resume_files:
+if st.button("🚀 Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state["processed_resumes"]:
             continue
 
         resume_text = read_file(resume_file)
-        correct_name = improved_extract_candidate_name(resume_text, resume_file.name)
+        correct_name = extract_candidate_name(resume_text, resume_file.name)
         correct_email = extract_email(resume_text)
 
-        with st.spinner(f"Analyzing {correct_name}..."):
+        with st.spinner(f"🔎 Analyzing {correct_name}..."):
             result = compare_resume(jd_text, resume_text, correct_name)
 
-        score_match = re.search(r"Score\*\*: \**([0-9]+)%", result)
+        score_match = re.search(r"Score\*\*: ?([0-9]+)%", result)
         score = int(score_match.group(1)) if score_match else 0
 
         st.session_state["results"].append({
@@ -249,26 +233,26 @@ if st.button("Run Matching") and jd_text and resume_files:
 
 for entry in st.session_state["results"]:
     st.markdown("---")
-    st.subheader(entry["correct_name"])
-    st.markdown(f"**Email**: {entry['email']}")
+    st.subheader(f"📌 {entry['correct_name']}")
+    st.markdown(f"📧 **Email**: {entry['email']}")
     st.markdown(entry["result"])
 
     score = entry["score"]
     if score < 50:
-        st.error("Not suitable – Major role mismatch")
+        st.error("❌ Not suitable – Major role mismatch")
     elif score < 70:
-        st.warning("Consider with caution – Lacks core skills")
+        st.warning("⚠️ Consider with caution – Lacks core skills")
     else:
-        st.success("Strong match – Good alignment with JD")
+        st.success("✅ Strong match – Good alignment with JD")
 
-    if st.button(f"Generate Follow-up for {entry['correct_name']}", key=f"followup_{entry['correct_name']}"):
+    if st.button(f"✉️ Generate Follow-up for {entry['correct_name']}", key=f"followup_{entry['correct_name']}"):
         with st.spinner("Generating messages..."):
             followup = generate_followup(jd_text, entry["resume_text"])
             st.markdown("---")
             st.markdown(followup)
 
 if st.session_state["summary"]:
-    st.markdown("### Summary of All Candidates")
+    st.markdown("### 📊 Summary of All Candidates")
     df_summary = pd.DataFrame(st.session_state["summary"]).sort_values(by="Score", ascending=False)
     st.dataframe(df_summary)
 
@@ -277,7 +261,7 @@ if st.session_state["summary"]:
         df_summary.to_excel(writer, index=False)
 
     st.download_button(
-        label="Download Summary as Excel",
+        label="📥 Download Summary as Excel",
         data=excel_buffer.getvalue(),
         file_name="resume_match_summary.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
