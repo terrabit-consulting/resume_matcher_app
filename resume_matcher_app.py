@@ -64,7 +64,7 @@ def read_file(file):
         return file.read().decode("utf-8", errors="ignore")
 
 def extract_email(text):
-    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
+    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", text)
     return match.group() if match else "Not found"
 
 def extract_candidate_name_from_table(text):
@@ -195,8 +195,10 @@ if st.button("🔁 Start New Matching Session"):
 jd_file = st.file_uploader("📄 Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
 resume_files = st.file_uploader("📑 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
 
+# ✅ Store JD only once and reuse for every resume
 if jd_file and not st.session_state.get("jd_text"):
-    st.session_state["jd_text"] = read_file(jd_file)
+    jd_text = read_file(jd_file)
+    st.session_state["jd_text"] = jd_text
     st.session_state["jd_file"] = jd_file.name
 
 jd_text = st.session_state.get("jd_text", "")
@@ -235,7 +237,6 @@ for entry in st.session_state["results"]:
     st.markdown("---")
     st.subheader(f"📌 {entry['correct_name']}")
     st.markdown(f"📧 **Email**: {entry['email']}")
-    # st.markdown(entry["result"])
     st.markdown(entry["result"], unsafe_allow_html=True)
 
     score = entry["score"]
@@ -250,7 +251,6 @@ for entry in st.session_state["results"]:
         with st.spinner("Generating messages..."):
             followup = generate_followup(jd_text, entry["resume_text"])
             st.markdown("---")
-            # st.markdown(followup)
             st.markdown(followup, unsafe_allow_html=True)
 
 if st.session_state["summary"]:
