@@ -235,7 +235,8 @@ for entry in st.session_state["results"]:
     st.markdown("---")
     st.subheader(f"📌 {entry['correct_name']}")
     st.markdown(f"📧 **Email**: {entry['email']}")
-    st.markdown(entry["result"])
+    # st.markdown(entry["result"])
+    st.markdown(entry["result"], unsafe_allow_html=True)
 
     score = entry["score"]
     if score < 50:
@@ -249,7 +250,8 @@ for entry in st.session_state["results"]:
         with st.spinner("Generating messages..."):
             followup = generate_followup(jd_text, entry["resume_text"])
             st.markdown("---")
-            st.markdown(followup)
+            # st.markdown(followup)
+            st.markdown(followup, unsafe_allow_html=True)
 
 if st.session_state["summary"]:
     st.markdown("### 📊 Summary of All Candidates")
