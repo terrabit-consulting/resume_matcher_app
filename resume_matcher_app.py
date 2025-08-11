@@ -1,4 +1,3 @@
-# app.py
 import openai
 import streamlit as st
 import time
@@ -7,246 +6,217 @@ import docx
 import pandas as pd
 import re
 import io
-import tempfile
-import os
+import spacy
 
-# -------- Optional .doc support (best-effort) ----------
-try:
-    import textract  # requires antiword/catdoc on system for .doc
-    HAS_TEXTRACT = True
-except Exception:
-    HAS_TEXTRACT = False
+@st.cache_resource
+def load_spacy_model():
+    return spacy.load("en_core_web_sm")
 
-# ---------------- OpenAI client ------------------------
+nlp = load_spacy_model()
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# ---------------- Constants/Regex ----------------------
-EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-SCORE_RE = re.compile(r"(?i)\bscore\b[^0-9]{0,12}(\d{1,3})\s*%")
+def call_gpt_with_fallback(prompt):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        st.error(f"❌ GPT-4o failed. {str(e)}")
+        return "⚠️ GPT processing failed."
 
-# ---------------- Utilities ---------------------------
-def trim(txt: str, max_chars: int = 12000) -> str:
-    """Hard cap to control tokens."""
-    if not txt:
-        return ""
-    return txt[:max_chars]
-
-def call_gpt_with_fallback(prompt: str) -> str:
-    """Retry with backoff + fallback model for reliability."""
-    models = ["gpt-4o", "gpt-4o-mini", "gpt-4o-mini"]
-    for attempt, model in enumerate(models):
-        try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are a concise recruiter assistant."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0,
-            )
-            return resp.choices[0].message.content.strip()
-        except Exception as e:
-            if attempt == len(models) - 1:
-                st.error(f"❌ OpenAI error: {e}")
-            time.sleep(1.5 * (attempt + 1))
-    return "⚠️ GPT processing failed."
-
-# ---------------- File readers ------------------------
-def read_pdf(file) -> str:
+def read_pdf(file):
     text = ""
     with fitz.open(stream=file.read(), filetype="pdf") as doc:
         for page in doc:
             text += page.get_text()
     return text
 
-def read_docx(file) -> str:
-    d = docx.Document(file)
-    parts = []
-    for p in d.paragraphs:
-        parts.append(p.text)
-    for table in d.tables:
+def read_docx(file):
+    doc = docx.Document(file)
+    full_text = []
+
+    for para in doc.paragraphs:
+        full_text.append(para.text)
+
+    for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
-                parts.append(cell.text)
+                full_text.append(cell.text)
+
     try:
-        section = d.sections[0]
-        for p in section.footer.paragraphs:
-            parts.append(p.text)
+        section = doc.sections[0]
+        for para in section.footer.paragraphs:
+            full_text.append(para.text)
     except Exception:
         pass
-    return "\n".join(parts)
 
-def read_doc(file, name: str) -> str:
-    """Best-effort .doc using textract; otherwise advice."""
-    if not HAS_TEXTRACT:
-        st.warning(f"⚠️ {name}: .doc reading needs `textract` (+ antiword/catdoc). "
-                   "Please convert to .docx/.pdf or install deps.")
-        return ""
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".doc") as tmp:
-        tmp.write(file.read())
-        tmp_path = tmp.name
-    try:
-        raw = textract.process(tmp_path)
-        return raw.decode("utf-8", errors="ignore")
-    finally:
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
+    return "\n".join(full_text)
 
 def read_file(file):
-    # Some browsers send generic MIME types; also check extension
-    name = getattr(file, "name", "").lower()
-    mime = getattr(file, "type", "")
-    if mime == "application/pdf" or name.endswith(".pdf"):
+    if file.type == "application/pdf":
         return read_pdf(file)
-    if (mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document") or name.endswith(".docx"):
+    elif file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         return read_docx(file)
-    if mime == "application/msword" or name.endswith(".doc"):
-        return read_doc(file, name)
-    # fallback plain text
-    return file.read().decode("utf-8", errors="ignore")
+    else:
+        return file.read().decode("utf-8", errors="ignore")
 
-# ---------------- Parsers -----------------------------
-def extract_email(text: str) -> str:
-    m = EMAIL_RE.search(text or "")
-    return m.group(0) if m else "Not found"
+def extract_email(text):
+    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", text)
+    return match.group() if match else "Not found"
 
-def extract_candidate_name_from_table(text: str):
-    matches = re.findall(r"(?i)Candidate Name\s*[\t:–-]*\s*(.+)", text or "")
+def extract_candidate_name_from_table(text):
+    matches = re.findall(r"(?i)Candidate Name\s*[\t:–-]*\s*(.+)", text)
     for match in matches:
-        name = match.strip()
+        name = match.strip().title()
         if 2 <= len(name.split()) <= 4:
-            return name.title()
+            return name
     return None
 
-def extract_candidate_name_from_footer(text: str):
-    m = re.search(r"(?i)Resume of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})", text or "")
-    if m:
-        return m.group(1).strip().title()
+def extract_candidate_name_from_footer(text):
+    footer_match = re.search(r"(?i)Resume of\s+([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", text)
+    if footer_match:
+        return footer_match.group(1).strip().title()
     return None
 
-def improved_extract_candidate_name(text: str, filename: str):
-    """GPT last resort on a trimmed header slice."""
-    trimmed_text = "\n".join((text or "").splitlines()[:50])
-    prompt = f"""
-Extract the candidate's full name ONLY from the resume text below.
-Return only the name; if unsure, return: Name Not Found
+def improved_extract_candidate_name(text, filename):
+    try:
+        trimmed_text = "\n".join(text.splitlines()[:50])
+        prompt = f"""
+You are a resume parser assistant.
+
+Extract the candidate's **full name only** from the following resume text.
+
+✅ Look for patterns like:
+- Candidate Name:
+- Resume of <Name>
+- Table headers or footers
+- A standalone name at the top (2–4 words, capitalized)
+
+❌ Do NOT return:
+- Job titles (e.g., Developer, Manager)
+- Technical terms (e.g., DB Servers, Azure, Python)
+- Locations (e.g., Bangalore, India)
+- Email addresses or phone numbers
+
+If no valid name is found, respond only with: Name Not Found
 
 Resume:
 {trimmed_text}
+
+Return only the name.
 """
-    name = call_gpt_with_fallback(prompt)
-    suspicious = ["java","python","developer","resume","engineer","servers","experience","summary"]
-    if (
-        not name
-        or len(name.split()) > 5
-        or any(w in name.lower() for w in suspicious)
-        or "@" in name
-        or name.lower().startswith("name not found")
-    ):
+        name = call_gpt_with_fallback(prompt)
+        suspicious_keywords = ["java", "python", "developer", "resume", "engineer", "servers"]
+        if (
+            not name or
+            len(name.split()) > 5 or
+            any(word in name.lower() for word in suspicious_keywords) or
+            "@" in name or
+            name.lower().startswith("name not found")
+        ):
+            return "Name Not Found"
+        return name.strip().title()
+    except Exception:
         return "Name Not Found"
-    return name.strip().title()
 
-def extract_candidate_name(text: str, filename: str):
-    return (
-        extract_candidate_name_from_table(text)
-        or extract_candidate_name_from_footer(text)
-        or improved_extract_candidate_name(text, filename)
-    )
+def extract_candidate_name(text, filename):
+    table_name = extract_candidate_name_from_table(text)
+    if table_name:
+        return table_name
 
-# ---------------- GPT prompts -------------------------
-def compare_resume(jd_text: str, resume_text: str, candidate_name: str) -> str:
-    """Forces the first-screenshot block format."""
+    footer_name = extract_candidate_name_from_footer(text)
+    if footer_name:
+        return footer_name
+
+    return improved_extract_candidate_name(text, filename)
+
+def compare_resume(jd_text, resume_text, candidate_name):
     prompt = f"""
-Compare this resume to the JD and reply ONLY in this exact format:
+You are a Recruiter Assistant bot.
 
-📛 {candidate_name}
-✅ Score: <0–100>%
-🔍 Reason:
-- 1–5 short bullets on role fit, core skills/tools (Selenium, SQL/Oracle, Linux, CI/CD), domains, deployments/logs
+Compare the following resume to the job description and return the result in the following format:
 
-<If score < 70 include this exact line>
-⚠️ This candidate may not meet the requirements.
+**Name**: {candidate_name}
+**Score**: [Match Score]%
 
-JD:
-{trim(jd_text)}
+**Reason**:
+- Role Match: (Brief explanation)
+- Skill Match: (Matched or missing skills)
+- Major Gaps: (What is completely missing or irrelevant)
+
+Warning: Add only if score < 70%
+
+Job Description:
+{jd_text}
 
 Resume:
-{trim(resume_text)}
+{resume_text}
 """
     return call_gpt_with_fallback(prompt)
 
-def generate_followup(jd_text: str, resume_text: str):
+def generate_followup(jd_text, resume_text):
     prompt = f"""
-Create 3 things based on this JD + resume:
+Based on the resume and job description below, generate:
+1. WhatsApp message (casual)
+2. Email message (formal)
+3. Screening questions (3-5)
 
-1) WhatsApp (casual, 3–4 lines)
-2) Email (formal, concise, with role, next steps, availability)
-3) 3 screening questions focused on gaps vs JD
-
-JD:
-{trim(jd_text)}
+Job Description:
+{jd_text}
 
 Resume:
-{trim(resume_text)}
+{resume_text}
 """
     return call_gpt_with_fallback(prompt)
 
-# ---------------- Streamlit UI ------------------------
+# Streamlit UI
 st.set_page_config(page_title="Resume Matcher GPT", layout="centered")
 st.title("📌 Terrabit Consulting Talent Match System")
 st.write("Upload a JD and multiple resumes. Get match scores, red flags, and follow-up messaging.")
 
-# Session state
-for key, default in [
-    ("results", []),
-    ("processed_resumes", set()),
-    ("jd_text", ""),
-    ("jd_file", None),
-    ("summary", []),
-]:
-    if key not in st.session_state:
-        st.session_state[key] = default
+if "results" not in st.session_state:
+    st.session_state["results"] = []
+if "processed_resumes" not in st.session_state:
+    st.session_state["processed_resumes"] = set()
+if "jd_text" not in st.session_state:
+    st.session_state["jd_text"] = ""
+if "jd_file" not in st.session_state:
+    st.session_state["jd_file"] = None
+if "summary" not in st.session_state:
+    st.session_state["summary"] = []
 
 if st.button("🔁 Start New Matching Session"):
     st.session_state.clear()
     st.rerun()
 
-jd_file = st.file_uploader("📄 Upload Job Description", type=["txt", "pdf", "docx", "doc"], key="jd_uploader")
-resume_files = st.file_uploader("📑 Upload Candidate Resumes", type=["txt", "pdf", "docx", "doc"], accept_multiple_files=True, key="resume_uploader")
+jd_file = st.file_uploader("📄 Upload Job Description", type=["txt", "pdf", "docx"], key="jd_uploader")
+resume_files = st.file_uploader("📑 Upload Candidate Resumes", type=["txt", "pdf", "docx"], accept_multiple_files=True, key="resume_uploader")
 
-# Load JD once
+# ✅ Store JD only once and reuse for every resume
 if jd_file and not st.session_state.get("jd_text"):
     jd_text = read_file(jd_file)
     st.session_state["jd_text"] = jd_text
-    st.session_state["jd_file"] = getattr(jd_file, "name", "JD")
+    st.session_state["jd_file"] = jd_file.name
 
 jd_text = st.session_state.get("jd_text", "")
 
-# Guard UI
-run_disabled = not (jd_text and resume_files)
-st.button("🚀 Run Matching", disabled=run_disabled, key="run_guard")
-
-if not run_disabled and st.session_state.get("run_clicked") is None:
-    st.session_state["run_clicked"] = True
+if st.button("🚀 Run Matching") and jd_text and resume_files:
     for resume_file in resume_files:
         if resume_file.name in st.session_state["processed_resumes"]:
             continue
 
         resume_text = read_file(resume_file)
-        if not resume_text:
-            # Already warned in read_file for .doc without textract
-            continue
-
         correct_name = extract_candidate_name(resume_text, resume_file.name)
         correct_email = extract_email(resume_text)
 
         with st.spinner(f"🔎 Analyzing {correct_name}..."):
             result = compare_resume(jd_text, resume_text, correct_name)
 
-        m = SCORE_RE.search(result or "")
-        score = max(0, min(100, int(m.group(1)))) if m else 0
+        score_match = re.search(r"Score\*\*: ?([0-9]+)%", result)
+        score = int(score_match.group(1)) if score_match else 0
 
         st.session_state["results"].append({
             "correct_name": correct_name,
@@ -263,10 +233,9 @@ if not run_disabled and st.session_state.get("run_clicked") is None:
             "Score": score
         })
 
-# Render results in first‑screenshot style
 for entry in st.session_state["results"]:
     st.markdown("---")
-    st.subheader(f"📛 {entry['correct_name']}")
+    st.subheader(f"📌 {entry['correct_name']}")
     st.markdown(f"📧 **Email**: {entry['email']}")
     st.markdown(entry["result"], unsafe_allow_html=True)
 
@@ -284,11 +253,10 @@ for entry in st.session_state["results"]:
             st.markdown("---")
             st.markdown(followup, unsafe_allow_html=True)
 
-# Summary + download
 if st.session_state["summary"]:
     st.markdown("### 📊 Summary of All Candidates")
     df_summary = pd.DataFrame(st.session_state["summary"]).sort_values(by="Score", ascending=False)
-    st.dataframe(df_summary, use_container_width=True)
+    st.dataframe(df_summary)
 
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
